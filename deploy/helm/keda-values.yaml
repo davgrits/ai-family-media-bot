@@ -1,0 +1,11 @@
+serviceAccount:
+  operator:
+    create: true
+    name: keda-operator
+    annotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::684049557114:role/ai-family-media-bot-keda-operator
+
+# Applies to operator, metrics API server and admission webhooks:
+# keep all KEDA components on the on-demand web node group.
+nodeSelector:
+  role: web

@@ -1,0 +1,10 @@
+{
+  "update_id": 100001,
+  "message": {
+    "message_id": 11,
+    "date": 1735488000,
+    "chat": { "id": 123456, "type": "private" },
+    "from": { "id": 123456, "is_bot": false, "first_name": "Dev" },
+    "text": "/custom a sleepy little fox who learns to share with the forest"
+  }
+}

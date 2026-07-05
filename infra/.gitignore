@@ -1,0 +1,18 @@
+# Local Terraform working files
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Variable files may carry account-specific values
+*.tfvars
+*.tfvars.json
+
+# The dependency lock file SHOULD be committed (reproducible provider
+# versions) — deliberately not ignored here.

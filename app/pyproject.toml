@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "family-media-bot"
+version = "0.1.0"
+description = "AI family-media Telegram bot — runnable stub (story + illustration), AWS behind interfaces."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110,<1.0",
+    "uvicorn[standard]>=0.29,<1.0",
+    "pydantic>=2.6,<3.0",
+    "pydantic-settings>=2.2,<3.0",
+    "prometheus-client>=0.20,<1.0",
+    "httpx>=0.27,<1.0",
+    "opentelemetry-sdk>=1.24,<2.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.24,<2.0",
+    "boto3>=1.34,<2.0",
+]
+
+[project.scripts]
+family-media-bot = "family_media_bot.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["family_media_bot*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
