@@ -62,12 +62,14 @@ Two independently-scaling tiers (per the contract):
 Everything AWS-shaped sits behind an interface, so the same app logic runs with
 fakes locally and real services in prod:
 
-| Concern  | Interface       | Dev impl (now)                | Prod impl (later)      |
-|----------|-----------------|-------------------------------|------------------------|
-| Queue    | `QueuePort`     | `InMemoryQueue`               | `SqsQueue`             |
-| Story    | `StoryProvider` | `FakeStoryProvider` (canned)  | `BedrockStoryProvider` |
-| Image    | `ImageProvider` | `FakeImageProvider` (PNG)     | `BedrockImageProvider` |
-| Storage  | `StoragePort`   | `LocalDirStorage`             | `S3Storage`            |
+| Concern  | Interface        | Dev impl (now)                | Prod impl (later)       |
+|----------|------------------|-------------------------------|-------------------------|
+| Queue    | `QueuePort`      | `InMemoryQueue`               | `SqsQueue`              |
+| Story    | `StoryProvider`  | `FakeStoryProvider` (canned)  | `BedrockStoryProvider`  |
+| Image    | `ImageProvider`  | `FakeImageProvider` (PNG)     | `BedrockImageProvider`  |
+| Vision   | `VisionProvider` | `FakeVisionProvider` (canned) | `BedrockVisionProvider` |
+| Storage  | `StoragePort`    | `LocalDirStorage`             | `S3Storage`             |
+| Profiles | `ProfileStore`   | `LocalDirProfileStore`        | `S3ProfileStore`        |
 
 Each is selected by an environment variable; both sides are real — the same
 app logic runs with fakes on a laptop and against Bedrock/SQS/S3 in the demo.
@@ -87,7 +89,7 @@ Every decision below is also documented in-line next to the code that makes it
 | **SQS between the tiers, DLQ after 3 attempts** | Generation takes seconds — too slow for a webhook response; poison messages get parked for inspection instead of looping and burning Bedrock money | Replies are async by design |
 | **S3: 30-day expiry, no versioning** | Generated media is ephemeral and reproducible on demand — old versions are pure storage cost | Can't re-send a story older than 30 days |
 | **Immutable ECR tags, keep last 10** | What runs in the cluster is always traceable to a commit; "latest drift" is impossible | Every build needs a fresh tag |
-| **No real photos of children anywhere** | Characters are text descriptions / stylized avatars only — a hard product constraint, not a technical one | Less personalized illustrations |
+| **No real photos of children anywhere** | Characters are text descriptions / stylized avatars only — a hard product constraint, not a technical one. Family photos sent to the bot are turned into *text* character cards by a vision model **in memory** and discarded; only the description is stored | Less personalized illustrations |
 
 ### Endpoints
 
@@ -98,13 +100,33 @@ Every decision below is also documented in-line next to the code that makes it
 | GET    | `/metrics` | Prometheus scrape (incl. per-job cost). |
 | POST   | `/webhook` | Telegram update → validate → enqueue → `200`. |
 
+### Languages
+
+The bot speaks **English, Russian, and Hebrew**. `/start` opens an
+inline-keyboard language picker; the choice is saved per chat (`ProfileStore`)
+and rides on every job as `language`, so the worker generates the story in the
+right language no matter which tier processes it. Before a choice is made, the
+bot falls back to Telegram's `language_code` hint, then English. `/language`
+switches at any time.
+
 ### Bot commands
 
 | Command          | Mode        | Meaning |
 |------------------|-------------|---------|
-| `/fairytale`     | `fairytale` | Guided scenario; assign family roles as text after the command. |
-| `/custom <text>` | `custom`    | Free-text scene prompt. |
-| `/surprise`      | `random`    | Random scenario. |
+| `/fairytale`     | `fairytale` | A tale starring your saved family cast; text after the command adds extra wishes. |
+| `/custom <text>` | `custom`    | Free-text scene prompt (plain messages work the same). |
+| `/surprise`      | `random`    | Random scenario — no questions asked. |
+| `/family`        | —           | Manage the story cast: list, `add Name: description`, `remove Name`, `clear`. |
+| `/start` / `/language` | —    | Greeting + language picker (en / ru / he). |
+
+### Family story cast (photo → character)
+
+Send the bot a **photo with the person's name as the caption** and a vision
+model (Claude on Bedrock; fake locally) writes a short stylized storybook
+description — hair, smile, vibe. Only that *text card* is saved to the chat's
+profile; the photo bytes never touch storage or logs. `/fairytale` then weaves
+the whole cast into one bedtime adventure. Characters can also be added
+photo-free with `/family add Name: description`.
 
 ---
 
@@ -130,14 +152,19 @@ family_media_bot/
   app.py          FastAPI app + endpoints + lifespan (starts the worker)
   worker.py       background queue consumer
   pipeline.py     per-job flow: story → image prompt → image → store → send
+  router.py       conversation brain shared by webhook + poller (languages,
+                  family cast, photo → character, job enqueueing)
   factory.py      composition root — picks an adapter per port from env
-  config.py       env-driven settings        models.py    frozen Job shape
-  prompts.py      prompt composition + bedtime guardrails
+  config.py       env-driven settings        models.py    Job + ChatProfile
+  prompts.py      prompt composition + bedtime guardrails (per language)
+  i18n.py         everything the bot says in chat, in en / ru / he
   commands.py     Telegram update → command   telegram.py  Bot API client
   logging_setup.py  structured JSON logs      telemetry.py  OpenTelemetry (OTLP)
   metrics.py      Prometheus metrics
-  ports/          QueuePort, StoryProvider, ImageProvider, StoragePort
-  adapters/       *_fake / *_inmemory / *_localdir (dev) + *_bedrock / *_s3 (stubs)
+  ports/          QueuePort, StoryProvider, ImageProvider, VisionProvider,
+                  StoragePort, ProfileStore
+  adapters/       *_fake / *_inmemory / *_localdir (dev) + *_bedrock / *_s3 (prod)
+tests/            pytest suite (i18n coverage, command parsing, router flows)
 ```
 
 ---
@@ -170,6 +197,14 @@ locally` → `job completed`, and find the generated PNG at
 logs `telegram disabled — would send story+image` instead of calling the Bot API.
 
 Scrape metrics (including per-job cost) at `http://localhost:8080/metrics`.
+
+Run the unit tests (command parsing, i18n completeness, all router
+conversation flows — language picker, family cast, photo → character):
+
+```bash
+make install-dev
+make test
+```
 
 ### Run in Docker
 
@@ -216,11 +251,14 @@ LOG_FORMAT=console
 make demo
 ```
 
-Message the bot (e.g. «история про дракона и маяк») — within ~30–60s it replies
-with a short Russian bedtime story and a matching illustration. Both are also
-saved to `s3://<bucket>/generated/<job_id>.txt|.png`. The logs narrate every
-step: `message received → job enqueued → job started → story done → image done
-→ saved → replied → job completed`.
+Send `/start` and pick a language (English / Русский / עברית), then message the
+bot (e.g. «история про дракона и маяк») — within ~30–60s it replies with a
+short bedtime story in your language and a matching illustration. Both are also
+saved to `s3://<bucket>/generated/<job_id>.txt|.png`. Send a photo with a name
+caption to add a family member to the story cast (stored as a text description
+under `s3://<bucket>/profiles/` — never the photo), then try `/fairytale`. The
+logs narrate every step: `message received → job enqueued → job started →
+story done → image done → saved → replied → job completed`.
 
 Notes: run only **one** polling instance per bot token (Telegram returns 409
 otherwise). If the image model fails, the bot falls back to a placeholder image

@@ -16,7 +16,7 @@ from botocore.config import Config
 from ..config import Settings
 from ..models import Mode
 from ..ports.story import StoryProvider, StoryResult
-from ..prompts import BEDTIME_SYSTEM_PROMPT
+from ..prompts import system_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -54,17 +54,17 @@ class BedrockStoryProvider(StoryProvider):
             "bedrock-runtime", region_name=settings.aws_region, config=_BOTO_CONFIG
         )
 
-    def _invoke(self, prompt: str) -> dict:
+    def _invoke(self, prompt: str, language: str) -> dict:
         return self._client.converse(
             modelId=self._model_id,
-            system=[{"text": BEDTIME_SYSTEM_PROMPT}],
+            system=[{"text": system_prompt(language)}],
             messages=[{"role": "user", "content": [{"text": prompt}]}],
-            # Russian words average several tokens; x4 leaves comfortable room.
+            # Russian/Hebrew words average several tokens; x4 leaves room.
             inferenceConfig={"maxTokens": max(1024, self._max_words * 4)},
         )
 
-    async def generate(self, mode: Mode, prompt: str) -> StoryResult:
-        resp = await asyncio.to_thread(self._invoke, prompt)
+    async def generate(self, mode: Mode, prompt: str, language: str = "ru") -> StoryResult:
+        resp = await asyncio.to_thread(self._invoke, prompt, language)
         raw = resp["output"]["message"]["content"][0]["text"]
         text, hint = _split_illustration_hint(raw)
         usage = resp.get("usage", {})

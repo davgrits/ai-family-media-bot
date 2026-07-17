@@ -4,6 +4,7 @@ no external dependencies."""
 
 from __future__ import annotations
 
+import json
 import logging
 
 import httpx
@@ -36,7 +37,11 @@ class TelegramClient:
         """Long-poll getUpdates (polling mode). Returns raw update dicts."""
         if not self.enabled:
             return []
-        params: dict = {"timeout": timeout, "allowed_updates": '["message"]'}
+        params: dict = {
+            "timeout": timeout,
+            # callback_query carries the language-picker button presses.
+            "allowed_updates": '["message","callback_query"]',
+        }
         if offset is not None:
             params["offset"] = offset
         # Read timeout must exceed the server-side long-poll window.
@@ -47,15 +52,48 @@ class TelegramClient:
         data = resp.json()
         return data.get("result", []) if data.get("ok") else []
 
-    async def send_text(self, chat_id: int, text: str) -> None:
-        """Send a plain text message (acks, greetings, error notices)."""
+    async def send_text(
+        self, chat_id: int, text: str, inline_keyboard: list[list[dict]] | None = None
+    ) -> None:
+        """Send a plain text message (acks, greetings, error notices). Pass
+        `inline_keyboard` (rows of {"text", "callback_data"}) for button menus
+        like the language picker."""
         if not self.enabled:
             logger.info(
                 "telegram disabled — would send text",
-                extra={"chat_id": chat_id, "chars": len(text)},
+                extra={
+                    "chat_id": chat_id,
+                    "chars": len(text),
+                    "buttons": bool(inline_keyboard),
+                },
             )
             return
-        await self._send_message(chat_id, text)
+        await self._send_message(chat_id, text, inline_keyboard)
+
+    async def answer_callback_query(self, callback_query_id: str) -> None:
+        """Ack a button press so the client stops showing its spinner."""
+        if not self.enabled:
+            logger.info("telegram disabled — would answer callback")
+            return
+        resp = await self._client.post(
+            self._url("answerCallbackQuery"), data={"callback_query_id": callback_query_id}
+        )
+        resp.raise_for_status()
+
+    async def download_file(self, file_id: str) -> bytes:
+        """Fetch a file's bytes by file_id (getFile → download). Used for the
+        family-photo → character flow; bytes stay in memory, never on disk."""
+        if not self.enabled:
+            raise RuntimeError("telegram is disabled — no token configured")
+        resp = await self._client.get(self._url("getFile"), params={"file_id": file_id})
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("ok"):
+            raise RuntimeError(f"getFile failed: {data}")
+        file_path = data["result"]["file_path"]
+        resp = await self._client.get(f"{self._api_base}/file/bot{self._token}/{file_path}")
+        resp.raise_for_status()
+        return resp.content
 
     async def send_story_and_image(
         self,
@@ -83,10 +121,13 @@ class TelegramClient:
             await self._send_message(chat_id, story_text)
             await self._send_photo(chat_id, png_bytes, filename)
 
-    async def _send_message(self, chat_id: int, text: str) -> None:
-        resp = await self._client.post(
-            self._url("sendMessage"), data={"chat_id": chat_id, "text": text}
-        )
+    async def _send_message(
+        self, chat_id: int, text: str, inline_keyboard: list[list[dict]] | None = None
+    ) -> None:
+        data: dict = {"chat_id": chat_id, "text": text}
+        if inline_keyboard:
+            data["reply_markup"] = json.dumps({"inline_keyboard": inline_keyboard})
+        resp = await self._client.post(self._url("sendMessage"), data=data)
         resp.raise_for_status()
 
     async def _send_photo(

@@ -39,10 +39,16 @@ Status legend: [x] done, [ ] pending
 ## 4. Application
 
 - [x] Create Telegram bot via BotFather, obtain token
-- [ ] Story prompts for Bedrock (age-appropriate, per-child character descriptions)
-- [ ] Illustration prompts (stylized avatars only, no real photos of minors)
+- [x] Story prompts for Bedrock (age-appropriate, per-child character descriptions)
+- [x] Illustration prompts (stylized avatars only, no real photos of minors)
 - [x] Wire real providers behind existing ports: Bedrock StoryProvider + ImageProvider, SQS QueuePort, S3 StoragePort
 - [x] End-to-end test: Telegram message -> story + image delivered
+- [x] Three languages (en/ru/he): /start language picker, per-chat choice in ProfileStore, story generated in the chat's language
+- [x] Family story cast: photo + name caption -> vision model -> text character card (photo never persisted); /family manage; /fairytale stars the cast
+- [x] Shared Router so webhook and polling paths behave identically
+- [x] Unit tests (pytest): i18n completeness, command parsing, router conversation flows
+- [ ] Verify with real Bedrock: he/en stories, vision character card from a photo
+- [ ] terraform apply: S3 lifecycle now scoped to generated/ (profiles/ must not expire)
 
 ## 5. CI/CD (GitHub Actions)
 

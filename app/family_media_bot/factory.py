@@ -6,9 +6,11 @@ from __future__ import annotations
 
 from .config import Settings
 from .ports.image import ImageProvider
+from .ports.profiles import ProfileStore
 from .ports.queue import QueuePort
 from .ports.storage import StoragePort
 from .ports.story import StoryProvider
+from .ports.vision import VisionProvider
 from .telegram import TelegramClient
 
 
@@ -58,6 +60,34 @@ def build_storage(s: Settings) -> StoragePort:
 
         return S3Storage(s.s3_bucket, s.aws_region)
     raise ValueError(f"unknown STORAGE={s.storage!r}")
+
+
+def build_vision(s: Settings) -> VisionProvider:
+    # Unset = follow the story provider: fake locally, Claude-on-Bedrock in prod.
+    provider = s.vision_provider or s.story_provider
+    if provider == "fake":
+        from .adapters.vision_fake import FakeVisionProvider
+
+        return FakeVisionProvider()
+    if provider == "bedrock":
+        from .adapters.vision_bedrock import BedrockVisionProvider
+
+        return BedrockVisionProvider(s)
+    raise ValueError(f"unknown VISION_PROVIDER={provider!r}")
+
+
+def build_profiles(s: Settings) -> ProfileStore:
+    # Unset = follow the storage backend: local dir locally, S3 in prod.
+    store = s.profile_store or s.storage
+    if store == "local":
+        from .adapters.profiles_localdir import LocalDirProfileStore
+
+        return LocalDirProfileStore(s.local_storage_dir)
+    if store == "s3":
+        from .adapters.profiles_s3 import S3ProfileStore
+
+        return S3ProfileStore(s.s3_bucket, s.aws_region)
+    raise ValueError(f"unknown PROFILE_STORE={store!r}")
 
 
 def build_telegram(s: Settings) -> TelegramClient:

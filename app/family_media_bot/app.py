@@ -16,12 +16,11 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from . import commands, factory, metrics
+from . import factory, metrics
 from .config import Settings, get_settings
 from .logging_setup import setup_logging
-from .models import new_job
 from .pipeline import Pipeline
-from .prompts import compose_prompt
+from .router import Router
 from .telemetry import setup_telemetry
 from .worker import Worker
 
@@ -43,6 +42,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.image = factory.build_image(settings)
         app.state.storage = factory.build_storage(settings)
         app.state.telegram = factory.build_telegram(settings)
+        app.state.profiles = factory.build_profiles(settings)
+        app.state.vision = factory.build_vision(settings)
+        # One conversation brain for both entry points (webhook + poller).
+        app.state.router = Router(
+            app.state.telegram, app.state.queue, app.state.profiles, app.state.vision
+        )
         app.state.worker = None
 
         app.state.poller = None
@@ -58,7 +63,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if settings.telegram_polling and settings.telegram_bot_token:
             from .poller import TelegramPoller
 
-            poller = TelegramPoller(app.state.telegram, app.state.queue)
+            poller = TelegramPoller(app.state.telegram, app.state.router)
             await poller.start()
             app.state.poller = poller
 
@@ -105,6 +110,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ("storage", app.state.storage),
             ("story", app.state.story),
             ("image", app.state.image),
+            ("profiles", app.state.profiles),
+            ("vision", app.state.vision),
         ):
             try:
                 checks[name] = bool(await component.check_ready())
@@ -132,22 +139,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             metrics.WEBHOOK_UPDATES.labels(result="invalid").inc()
             return {"ok": True}
 
-        parsed = commands.parse(update)
-        if parsed is None:
-            metrics.WEBHOOK_UPDATES.labels(result="ignored").inc()
-            return {"ok": True}
-
-        # Compose the prompt and enqueue — then return immediately.
-        prompt = compose_prompt(parsed.mode, parsed.args)
-        job = new_job(parsed.chat_id, parsed.mode, prompt)
-        await app.state.queue.enqueue(job)
-
-        metrics.WEBHOOK_UPDATES.labels(result="accepted").inc()
-        metrics.JOBS_ENQUEUED.labels(mode=parsed.mode.value).inc()
-        logger.info(
-            "job enqueued",
-            extra={"job_id": job.job_id, "mode": job.mode.value, "chat_id": job.chat_id},
-        )
+        # The shared Router replies to conversational updates (language picker,
+        # family cast) inline — quick Bot API calls — and enqueues generation
+        # jobs; either way this handler returns fast.
+        try:
+            result = await app.state.router.handle_update(update)
+        except Exception:
+            logger.exception("webhook update failed")
+            result = "ignored"
+        metrics.WEBHOOK_UPDATES.labels(result=result).inc()
         return {"ok": True}
 
     return app

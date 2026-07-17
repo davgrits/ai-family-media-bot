@@ -1,5 +1,7 @@
 # Media bucket — the prod implementation of the app's StoragePort. Workers
 # write generated PNGs to generated/<job_id>.png and send them to Telegram.
+# The app also keeps per-chat profiles (language + family story cast, text
+# only) under profiles/<chat_id>.json — durable, tiny, excluded from expiry.
 
 resource "aws_s3_bucket" "media" {
   # Account id suffix: bucket names are global, and this keeps the name unique
@@ -37,7 +39,9 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "media" {
 
 # FinOps: generated media is ephemeral — it is delivered to Telegram within
 # seconds of creation. 30 days is a comfortable window for debugging and
-# re-sending; after that, objects are pure storage cost.
+# re-sending; after that, objects are pure storage cost. Scoped to the
+# generated/ prefix: chat profiles (profiles/) must NOT expire — losing them
+# would silently wipe every family's language choice and story cast.
 resource "aws_s3_bucket_lifecycle_configuration" "media" {
   bucket = aws_s3_bucket.media.id
 
@@ -45,7 +49,9 @@ resource "aws_s3_bucket_lifecycle_configuration" "media" {
     id     = "expire-generated-media"
     status = "Enabled"
 
-    filter {} # whole bucket — everything in here is ephemeral
+    filter {
+      prefix = "generated/"
+    }
 
     expiration {
       days = 30

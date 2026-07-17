@@ -52,19 +52,30 @@ Two independently-scaling tiers:
 
 ---
 
-## Bot commands (MVP)
+## Bot commands
+
+Generation commands — each maps internally to one generation job:
 
 | Command          | Mode        | Meaning |
 |------------------|-------------|---------|
-| `/fairytale`     | `fairytale` | Guided scenario; assign family roles as text ("mom = king", "me = sleepy queen"). |
-| `/custom <text>` | `custom`    | Free-text scene prompt. |
-| `/surprise`      | `random`    | Random scenario — surprise me. |
+| `/fairytale`     | `fairytale` | A tale starring the saved family cast (see `/family`); free text after the command adds extra wishes. |
+| `/custom <text>` | `custom`    | Free-text scene prompt (plain messages behave the same). |
+| `/surprise`      | `random`    | Random scenario — surprise me, no questions asked. |
 
-Each maps internally to one generation job.
+Conversational commands — handled by the shared router, no job enqueued:
+
+| Command       | Meaning |
+|---------------|---------|
+| `/start`      | Greet + inline-keyboard language picker (en / ru / he). |
+| `/language`   | Reopen the language picker. |
+| `/family`     | List the story cast. `add Name: description`, `remove Name`, `clear` subcommands; sending a **photo with a name caption** adds a member via the vision model (the photo is never stored — text description only). |
 
 ---
 
 ## Job shape (frozen)
+
+`language` was added additively (defaulted), so pre-existing queued messages
+still parse; everything else is unchanged.
 
 ```json
 {
@@ -72,6 +83,7 @@ Each maps internally to one generation job.
   "chat_id": 123456,
   "mode": "fairytale | custom | random",
   "prompt": "composed scene description (text)",
+  "language": "en | ru | he",
   "created_at": "iso8601"
 }
 ```
@@ -95,12 +107,14 @@ request level.
 
 ## Swap points (interfaces, not hardcoded)
 
-| Concern   | Interface       | Dev impl                          | Prod impl            |
-|-----------|-----------------|-----------------------------------|----------------------|
-| Queue     | `QueuePort`     | InMemoryQueue                     | SqsQueue             |
-| Story     | `StoryProvider` | FakeStoryProvider (canned text)   | BedrockStoryProvider |
-| Image     | `ImageProvider` | FakeImageProvider (placeholder)   | BedrockImageProvider |
-| Storage   | `StoragePort`   | LocalDir                          | S3                   |
+| Concern   | Interface        | Dev impl                          | Prod impl             |
+|-----------|------------------|-----------------------------------|-----------------------|
+| Queue     | `QueuePort`      | InMemoryQueue                     | SqsQueue              |
+| Story     | `StoryProvider`  | FakeStoryProvider (canned text)   | BedrockStoryProvider  |
+| Image     | `ImageProvider`  | FakeImageProvider (placeholder)   | BedrockImageProvider  |
+| Vision    | `VisionProvider` | FakeVisionProvider (canned card)  | BedrockVisionProvider |
+| Storage   | `StoragePort`    | LocalDir                          | S3                    |
+| Profiles  | `ProfileStore`   | LocalDirProfileStore              | S3ProfileStore        |
 
 Keeping these behind interfaces is what lets the stub run on a laptop with **no
 AWS**, and lets the infra slot in later without touching app logic.

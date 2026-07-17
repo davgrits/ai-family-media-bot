@@ -1,4 +1,4 @@
-.PHONY: help venv install run demo docker-build docker-run smoke clean
+.PHONY: help venv install install-dev test run demo docker-build docker-run smoke clean
 
 APP_DIR := app
 IMAGE   := family-media-bot:dev
@@ -8,6 +8,8 @@ help:
 	@echo "Targets:"
 	@echo "  make venv          Create app/.venv"
 	@echo "  make install       Install runtime deps into the venv"
+	@echo "  make install-dev   Install runtime + test deps"
+	@echo "  make test          Run the unit tests (pytest)"
 	@echo "  make run           Run the service locally (fake providers, no AWS)"
 	@echo "  make demo          Run the live demo (Telegram polling + Bedrock + SQS + S3; needs app/.env)"
 	@echo "  make docker-build  Build the container image"
@@ -19,6 +21,12 @@ venv:
 
 install: venv
 	cd $(APP_DIR) && ./.venv/bin/pip install -U pip && ./.venv/bin/pip install -r requirements.txt
+
+install-dev: install
+	cd $(APP_DIR) && ./.venv/bin/pip install -r requirements-dev.txt
+
+test:
+	cd $(APP_DIR) && ./.venv/bin/python -m pytest -q
 
 run:
 	cd $(APP_DIR) && ./.venv/bin/python -m family_media_bot

@@ -8,7 +8,13 @@ from prometheus_client import Counter, Gauge, Histogram
 WEBHOOK_UPDATES = Counter(
     "fmb_webhook_updates_total",
     "Telegram updates received, by handling result.",
-    ["result"],  # accepted | ignored | invalid
+    ["result"],  # accepted | handled | ignored | invalid
+)
+
+CHARACTERS_ADDED = Counter(
+    "fmb_characters_added_total",
+    "Family story-cast characters added, by source.",
+    ["source"],  # photo (vision model) | text (/family add)
 )
 
 JOBS_ENQUEUED = Counter(

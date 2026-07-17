@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     image_provider: Literal["fake", "bedrock"] = "fake"
     storage: Literal["local", "s3"] = "local"
     local_storage_dir: str = "./var/media"
+    # Vision (photo → character card): empty = follow STORY_PROVIDER.
+    vision_provider: Literal["", "fake", "bedrock"] = ""
+    # Chat profiles (language + family cast): empty = follow STORAGE.
+    profile_store: Literal["", "local", "s3"] = ""
 
     # --- Telegram ---
     telegram_bot_token: str = ""
