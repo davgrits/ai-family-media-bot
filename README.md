@@ -1,65 +1,104 @@
 # AI Family Media Bot
 
 A portfolio DevOps project: a Telegram bot that turns a family's request into a
-short, age-appropriate **bedtime story** plus **one illustration**, designed to
-run on **AWS (EKS + Bedrock)** or **GCP (GKE + Vertex AI)**, while still running
-end-to-end on a laptop with no cloud account.
+short, age-appropriate **bedtime story** plus **one illustration**. The
+application supports **AWS (EKS + Bedrock)** and **GCP (GKE + Vertex AI)** and
+also runs end-to-end on a laptop with no cloud account.
 
-This repo is split so the **infrastructure is built once** and the **brains swap
-in later** without touching Terraform. The frozen interface between the two is
-[`docs/api-contract.md`](docs/api-contract.md) — the source of truth.
+The business workflow and Kubernetes workload are shared. Cloud services stay
+behind ports and adapters, each cloud has an independent Terraform root, and
+one Helm chart renders either provider-specific deployment. The frozen
+application contract is [`docs/api-contract.md`](docs/api-contract.md).
 
-> **Status:** AWS works end-to-end. The GCP-native Pub/Sub, GCS, Vertex AI,
-> GKE, Helm, Workload Identity, and KEDA path is implemented and live-verified.
-> See the [GCP interview runbook](docs/gcp-interview-runbook.md).
+> **Current state:** infrastructure is defined for AWS and GCP, but the
+> application is currently deployed only on GCP. The live path uses GKE,
+> Pub/Sub, GCS, Vertex AI, Workload Identity, KEDA, and the shared Helm chart.
+> AWS remains a supported deployment target and is not currently running. See
+> the [GCP runbook](docs/gcp-interview-runbook.md) and
+> [roadmap](ROADMAP.md).
 
 ---
 
 ## Architecture
 
-Media generation is slow (seconds–minutes), so it can't run inside the webhook —
-Telegram would time out. The webhook only **enqueues** and returns `200` fast; a
-**worker** does the generation asynchronously.
+Media generation is slow (seconds–minutes), so it cannot run inline with
+Telegram intake. Whether an update arrives through live long polling or
+`/webhook`, the web tier only **enqueues** it; a **worker** performs generation
+asynchronously.
 
 ```mermaid
-flowchart LR
+flowchart TB
     TG["Telegram Bot API"]
+    HELM["Shared Helm chart<br/>web + worker + config + identity + scaler"]
 
-    subgraph AWS["AWS · us-east-1"]
-        subgraph VPC["VPC 10.0.0.0/16 · 2 AZ · nodes in private subnets"]
-            NAT["single NAT gateway<br/>(Telegram egress only)"]
-            subgraph EKS["EKS"]
-                WEB["web tier · on-demand, warm<br/>receive update, enqueue<br/>healthz / readyz / metrics"]
-                WRK["worker tier · Spot · 0 to N<br/>taint workload=jobs<br/>KEDA + cluster-autoscaler"]
-            end
-            VPCE["VPC endpoints · all AWS calls private<br/>bedrock-runtime · sqs · sts<br/>+ free S3 gateway"]
-        end
-        SQS["SQS jobs queue<br/>+ DLQ, redrive after 3"]
-        BR["Bedrock<br/>Claude Haiku · story, us-east-1<br/>Stability Image Core · illustration, us-west-2"]
-        S3[("S3 media bucket<br/>private · SSE · 30-day expiry")]
-        IRSA["IAM via IRSA / OIDC<br/>no long-lived keys anywhere"]
+    subgraph GCP["GCP · currently deployed"]
+        direction LR
+        GWEB["GKE web<br/>always warm"]
+        GPS["Pub/Sub<br/>jobs + DLQ"]
+        GKEDA["KEDA + GKE autoscaler"]
+        GWRK["GKE worker<br/>Spot · 0 to N"]
+        GAI["Vertex AI<br/>Gemini 3.5 Flash<br/>Gemini 2.5 Flash Image"]
+        GCS[("GCS media<br/>private · lifecycle expiry")]
+        GWI["Workload Identity<br/>keyless IAM"]
     end
 
-    TG <-->|Bot API| NAT
-    NAT <--> WEB
-    WEB -->|enqueue job| SQS
-    SQS -->|consume| WRK
-    WRK -->|InvokeModel| BR
-    WRK -->|story .txt + image .png| S3
-    WRK -->|reply: story + photo| NAT
-    WEB -.-> VPCE
-    WRK -.-> VPCE
-    IRSA -. per-service-account credentials .- EKS
+    subgraph AWS["AWS · defined, not currently deployed"]
+        direction LR
+        AWEB["EKS web<br/>on-demand"]
+        ASQS["SQS<br/>jobs + DLQ"]
+        AKEDA["KEDA + cluster-autoscaler"]
+        AWRK["EKS worker<br/>Spot · 0 to N"]
+        ABR["Bedrock<br/>story + image"]
+        AS3[("S3 media<br/>private · lifecycle expiry")]
+        AIRSA["IRSA / OIDC<br/>keyless IAM"]
+    end
+
+    HELM -->|"values/gcp.yaml"| GWEB
+    HELM -->|"values/gcp.yaml"| GWRK
+    HELM -.->|"values/aws.yaml"| AWEB
+    HELM -.->|"values/aws.yaml"| AWRK
+
+    TG <-->|"live Bot API"| GWEB
+    GWEB -->|"publish"| GPS
+    GPS -->|"consume"| GWRK
+    GPS -.->|"backlog"| GKEDA
+    GKEDA -.->|"scale"| GWRK
+    GWRK --> GAI
+    GWRK --> GCS
+    GWRK -->|"story + image"| TG
+    GWI -.-> GWEB
+    GWI -.-> GWRK
+
+    TG -.->|"when deployed"| AWEB
+    AWEB -.-> ASQS
+    ASQS -.-> AWRK
+    ASQS -.-> AKEDA
+    AKEDA -.-> AWRK
+    AWRK -.-> ABR
+    AWRK -.-> AS3
+    AWRK -.->|"story + image"| TG
+    AIRSA -.-> AWEB
+    AIRSA -.-> AWRK
+
+    classDef shared fill:#e8f0fe,stroke:#1967d2,color:#174ea6
+    classDef live fill:#e6f4ea,stroke:#188038,color:#137333
+    classDef available fill:#f1f3f4,stroke:#5f6368,color:#3c4043
+    class HELM shared
+    class GWEB,GPS,GKEDA,GWRK,GAI,GCS,GWI live
+    class AWEB,ASQS,AKEDA,AWRK,ABR,AS3,AIRSA available
 ```
+
+Solid paths are the live GCP deployment. Dashed AWS paths show the equivalent
+deployment the same chart renders when AWS infrastructure is selected.
 
 Two independently-scaling tiers (per the contract):
 
-- **web tier** — always warm: receives webhooks, enqueues, serves `/healthz`,
-  `/readyz`, `/metrics`.
+- **web tier** — always warm: receives Telegram updates, enqueues, and serves
+  `/healthz`, `/readyz`, `/metrics`.
 - **worker tier** — scales 0→N on queue depth: does the generation.
 
-Everything AWS-shaped sits behind an interface, so the same app logic runs with
-fakes locally and real services in prod:
+Every cloud integration sits behind an interface, so the same application logic
+runs with local fakes or either provider:
 
 | Concern | Interface | Local | AWS | GCP |
 |---|---|---|---|---|
@@ -68,31 +107,32 @@ fakes locally and real services in prod:
 | Image | `ImageProvider` | `FakeImageProvider` | `BedrockImageProvider` | `VertexImageProvider` |
 | Storage | `StoragePort` | `LocalDirStorage` | `S3Storage` | `GcsStorage` |
 
-Each is selected by an environment variable; both sides are real — the same
-app logic runs with fakes on a laptop and against Bedrock/SQS/S3 in the demo.
+Each adapter is selected by environment variables. GCP is the active production
+configuration; AWS adapters and Helm values remain maintained and render-tested.
 
 ### Design decisions
 
-Every decision below is also documented in-line next to the code that makes it
-(mostly in [`infra/`](infra/)); this is the short version.
+Every decision below is documented close to its implementation in
+[`app/`](app/), [`infra/`](infra/), or [`deploy/`](deploy/); this is the short
+version.
 
 | Decision | Why | Trade-off accepted |
 |---|---|---|
-| **IRSA everywhere, zero long-lived keys** | Pods exchange their service-account token via STS; each identity (app, KEDA, autoscaler) gets its own least-privilege role scoped to exactly the configured models, one queue, one bucket ([`infra/irsa.tf`](infra/irsa.tf)) | More IAM plumbing up front |
-| **Single NAT gateway, not one per AZ** | The only traffic that needs internet egress is the Telegram Bot API; NATs cost ~$32/mo each | An AZ outage takes down Telegram egress — acceptable for this workload |
-| **Only 3 interface VPC endpoints** (bedrock-runtime, sqs, sts) + free S3 gateway | Private paths only where traffic is constant or carries family content; cuts the fixed endpoint bill roughly in half (~$87 → ~$44/mo) | ECR pulls and logs ride the NAT — low-volume, non-sensitive |
-| **Worker tier on Spot, 0→N, tainted** | Generation jobs are retryable by design (SQS redrive), the textbook Spot workload — ~70% cheaper compute; the `workload=jobs` taint stops system pods from pinning a node alive and blocking scale-to-zero | A job can be interrupted mid-run and retried |
-| **Web tier on-demand, always warm** | A Spot interruption here means dropped Telegram updates | Pays on-demand price for one small node |
-| **SQS between the tiers, DLQ after 3 attempts** | Generation takes seconds — too slow for a webhook response; poison messages get parked for inspection instead of looping and burning Bedrock money | Replies are async by design |
-| **S3: 30-day expiry, no versioning** | Generated media is ephemeral and reproducible on demand — old versions are pure storage cost | Can't re-send a story older than 30 days |
-| **Immutable ECR tags, keep last 10** | What runs in the cluster is always traceable to a commit; "latest drift" is impossible | Every build needs a fresh tag |
-| **No real photos of children anywhere** | Characters are text descriptions / stylized avatars only — a hard product constraint, not a technical one | Less personalized illustrations |
+| **Independent Terraform roots** | [`infra/aws/`](infra/aws/) and [`infra/gcp/`](infra/gcp/) have separate providers, backends, and state, so changing one cloud cannot rewrite the other | Shared concepts are expressed twice at the infrastructure layer |
+| **One shared application chart** | [`deploy/charts/family-media-bot/`](deploy/charts/family-media-bot/) owns the common web/worker workload; cloud values branch only for identity, environment, and scaler details | The values schema must validate both providers |
+| **Ports and adapters for cloud services** | Queue, story, image, and storage implementations can change without changing the pipeline | More interfaces and provider tests |
+| **Keyless workload identity** | GCP uses Workload Identity; AWS uses IRSA/OIDC. Neither deployment needs a service-account key or static cloud credential | More IAM plumbing up front |
+| **Warm web, event-scaled worker** | Telegram intake stays responsive while generation workers scale from zero against Pub/Sub or SQS backlog | Replies are asynchronous |
+| **Spot worker capacity** | Generation jobs are retryable and acknowledged only after processing, making them suitable for interruptible nodes | Interrupted work may be retried |
+| **Provider-native private storage with expiry** | GCS or S3 keeps generated media private and removes reproducible artifacts automatically | Old stories cannot be re-sent indefinitely |
+| **Immutable deployment tags** | Artifact Registry or ECR images remain traceable to a specific rollout | Every release needs a fresh tag |
+| **No real photos of children** | Characters are text descriptions or stylized avatars only | Illustrations are intentionally less personalized |
 
 ### Endpoints
 
 | Method | Path       | Purpose |
 |--------|------------|---------|
-| GET    | `/healthz` | Liveness. **Does not** touch Bedrock/SQS/S3. |
+| GET    | `/healthz` | Liveness. **Does not** call cloud providers. |
 | GET    | `/readyz`  | Readiness — checks each swap-point dep; `503` if any is unready. |
 | GET    | `/metrics` | Prometheus scrape (incl. per-job cost). |
 | POST   | `/webhook` | Telegram update → validate → enqueue → `200`. |
@@ -107,7 +147,7 @@ Every decision below is also documented in-line next to the code that makes it
 
 ---
 
-## Repo layout — `app/` vs `infra/`
+## Repo layout
 
 ```
 app/             the Python service — local, AWS, and GCP adapters
@@ -117,15 +157,15 @@ deploy/addons/   provider-specific KEDA/autoscaler Helm values
 deploy/legacy/   historical manifests, not a production deployment path
 infra/aws/       AWS Terraform — VPC, EKS, SQS, S3, ECR, IAM/IRSA
 infra/gcp/       GCP Terraform — VPC, GKE, Pub/Sub, GCS, Artifact Registry, Workload Identity
-.github/workflows/   CI (next up)
-observability/   dashboards / collector config (later)
+.github/workflows/   placeholder for planned CI
+observability/   placeholder for planned dashboards and collector config
 docs/            the frozen API & job contract
 ```
 
-The split is the whole point: `app/` only ever depends on the four interfaces,
-so `infra/` can be built and changed independently. When the infra is ready you
-flip env vars (`STORY_PROVIDER=bedrock`, `STORAGE=s3`, a real `QUEUE`, …) and the
-app logic is untouched.
+The split is the whole point: `app/` depends on four interfaces, each Terraform
+root owns one cloud, and the shared Helm chart injects the selected provider
+configuration. Switching clouds changes adapters, values, and identity—not the
+story pipeline.
 
 `app/` internals:
 
@@ -146,7 +186,7 @@ family_media_bot/
 
 ---
 
-## Run it locally (no AWS, no Telegram token)
+## Run it locally (no cloud account, no Telegram token)
 
 Requires Python 3.11+.
 
@@ -184,27 +224,46 @@ make docker-run               # maps :8080, reads ./.env
 
 ---
 
-## Local demo (real Telegram + Bedrock + SQS + S3)
+## Current deployment (GCP)
 
-One process runs everything: a Telegram **long-polling** listener (no webhook
-needed), the SQS-backed queue, and the worker that calls Bedrock and S3.
+The live release is installed on GKE from the shared Helm chart with
+[`deploy/values/gcp.yaml`](deploy/values/gcp.yaml):
+
+- the web tier stays warm and polls Telegram;
+- Pub/Sub carries generation jobs and KEDA scales the worker from zero;
+- Vertex AI uses `gemini-3.5-flash` for stories and
+  `gemini-2.5-flash-image` for illustrations;
+- GCS stores private generated media;
+- GKE Workload Identity supplies keyless access to Google Cloud APIs.
+
+Operational commands and verified deployment facts are in the
+[GCP runbook](docs/gcp-interview-runbook.md).
+
+---
+
+## AWS demo target (not currently deployed)
+
+AWS infrastructure and application configuration remain in the repository, but
+there is no current AWS runtime deployment. After applying [`infra/aws/`](infra/aws/),
+one process can run a Telegram **long-polling** listener, the SQS-backed queue,
+and the worker that calls Bedrock and S3.
 
 **Prerequisites**
 
 - `make install` done (Python 3.11+, creates `app/.venv`).
-- AWS credentials for account `684049557114` in your default profile / env vars
-  (Bedrock, SQS, and S3 access). The infra (queue + bucket) is already applied.
+- An applied AWS stack and AWS credentials with access to its Bedrock, SQS, and
+  S3 resources.
 - A Telegram bot token from [@BotFather](https://t.me/BotFather).
 
 **Configure** — create `app/.env` (gitignored) with the demo values:
 
 ```bash
 QUEUE=sqs
-SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/684049557114/ai-family-media-bot-jobs
+SQS_QUEUE_URL=<output of terraform -chdir=infra/aws output -raw jobs_queue_url>
 STORY_PROVIDER=bedrock
 IMAGE_PROVIDER=bedrock
 STORAGE=s3
-S3_BUCKET=ai-family-media-bot-media-684049557114
+S3_BUCKET=<output of terraform -chdir=infra/aws output -raw media_bucket_name>
 AWS_REGION=us-east-1
 BEDROCK_TEXT_MODEL_ID=us.anthropic.claude-haiku-4-5-20251001-v1:0
 BEDROCK_IMAGE_MODEL_ID=stability.stable-image-core-v1:1
@@ -248,25 +307,23 @@ most:
 ## Infrastructure
 
 Terraform is split into independent cloud roots under [`infra/`](infra/).
-The existing AWS environment lives in [`infra/aws/`](infra/aws/): a single root
-module (one state file, no dev/prod split) with one `.tf` file per concern —
-2-AZ VPC with a single NAT gateway, VPC endpoints so sensitive and constant
-AWS traffic (Bedrock, SQS, S3, STS) never leaves the AWS backbone (ECR pulls
-and logs deliberately ride the NAT — a documented FinOps trade-off), EKS with
-a warm on-demand `web`
-node group and a Spot `workers` group scaling 0→N, SQS jobs queue + DLQ, a
-private 30-day-expiry media bucket, ECR, and least-privilege IRSA roles (app,
-KEDA, cluster-autoscaler). Community modules cover VPC/EKS boilerplate;
-everything carrying a design decision is raw resources. Staged apply order:
-**bootstrap** (state bucket, by hand) → **network** (VPC +
-endpoints) → **data plane** (SQS/S3/ECR) → **eks** → **irsa** — full commands
-in [`infra/aws/README.md`](infra/aws/README.md). The GCP/GKE foundation is in
-[`infra/gcp/`](infra/gcp/) and has its own state backend and deployment guide.
-Both Terraform roots are consumed by the shared Helm chart in
-[`deploy/charts/family-media-bot/`](deploy/charts/family-media-bot/).
-[`deploy/values/aws.yaml`](deploy/values/aws.yaml) selects SQS, S3, Bedrock,
-and IRSA; [`deploy/values/gcp.yaml`](deploy/values/gcp.yaml) selects Pub/Sub,
-GCS, Vertex AI, and Workload Identity. The workload templates stay identical.
+Each root has its own backend and lifecycle:
+
+- [`infra/gcp/`](infra/gcp/) defines the currently deployed VPC, private-node
+  GKE cluster, Pub/Sub queue and DLQ, GCS media bucket, Artifact Registry, and
+  Workload Identity service accounts.
+- [`infra/aws/`](infra/aws/) defines the supported AWS target: VPC, EKS, SQS
+  and DLQ, S3, ECR, VPC endpoints, and IRSA roles. It is retained and validated
+  but is not currently deployed.
+
+Terraform owns cloud resources; it does not own Kubernetes workloads. The
+shared [`deploy/charts/family-media-bot/`](deploy/charts/family-media-bot/)
+chart owns the web and worker Deployments, configuration, service account, and
+KEDA objects. [`deploy/values/gcp.yaml`](deploy/values/gcp.yaml) selects the
+live Pub/Sub/GCS/Vertex/Workload Identity path, while
+[`deploy/values/aws.yaml`](deploy/values/aws.yaml) selects the equivalent
+SQS/S3/Bedrock/IRSA path. `make helm-lint` renders and validates both from the
+same templates.
 
 ## Observability
 

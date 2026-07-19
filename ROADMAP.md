@@ -2,67 +2,101 @@
 
 Status legend: [x] done, [ ] pending
 
-## 0. Local application skeleton
+> Current runtime: GCP only. AWS and GCP infrastructure are defined in separate
+> Terraform roots, and one shared Helm chart renders either deployment.
 
-- [x] FastAPI app stub, verified end-to-end locally
-- [x] Hexagonal ports for every external dependency: QueuePort, StoryProvider, ImageProvider, StoragePort
-- [x] Local in-memory/stub adapters: app runs fully without AWS
-- [x] Project config on pyproject.toml
-- [x] Dockerfile with layer-caching-friendly structure
+## 0. Core application
 
-## 1. Infrastructure (Terraform)
+- [x] FastAPI service verified end-to-end with local adapters
+- [x] Ports for queue, story, image, and storage dependencies
+- [x] Local in-memory, fake-model, and filesystem adapters
+- [x] Age-appropriate story and child-safe illustration prompts
+- [x] Telegram polling and webhook intake
+- [x] Ack after successful processing; nack/retry on failure
+- [x] Python 3.11 package, unit tests, and container image
 
-- [x] VPC: 2 AZ, public + private subnets, single NAT gateway
-- [x] VPC endpoints: S3 gateway + interface (bedrock-runtime, sqs, sts)
-- [x] SQS jobs queue + DLQ (redrive after 3)
-- [x] S3 media bucket (SSE, 30-day expiry, public access blocked)
-- [x] ECR repo (scan on push, immutable tags, keep last 10)
-- [x] EKS cluster + node groups: web (on-demand) and workers (Spot, 0 -> N, tainted)
-- [x] IRSA roles: app, keda-operator, cluster-autoscaler
-- [x] Full converge: `terraform plan` clean, no drift
-- [x] Verified scale-to-zero: workers node group starts at 0 nodes
+## 1. Multi-cloud runtime adapters
 
-## 2. Cluster add-ons (Helm)
+- [x] AWS: SQS, S3, and Bedrock adapters
+- [x] GCP: Pub/Sub, GCS, and Vertex AI adapters
+- [x] Provider selection through environment-driven factories
+- [x] Shared story/image pipeline with no cloud SDK imports in business logic
+- [x] Current models: `gemini-3.5-flash` and `gemini-2.5-flash-image`
 
-- [x] KEDA with IRSA annotation (`keda_operator_role_arn`)
-- [x] cluster-autoscaler with IRSA annotation (`cluster_autoscaler_role_arn`)
-- [ ] Verify: KEDA ScaledObject scales workers 0 -> 1 on SQS message
+## 2. Infrastructure (Terraform)
 
-## 3. Kubernetes manifests
+### GCP — deployed
 
-- [ ] Namespace `app`, ServiceAccount `family-media-bot` with IRSA annotation (`app_role_arn`)
-- [ ] Deployment web: nodeSelector `role=web`
-- [ ] Deployment worker: nodeSelector `role=worker`, toleration `workload=jobs:NoSchedule`
-- [ ] Secret: Telegram bot token
-- [ ] KEDA ScaledObject on jobs queue
+- [x] VPC, Cloud NAT, and private-node GKE
+- [x] Separate on-demand web and Spot worker node pools
+- [x] Pub/Sub jobs topic, subscription, and dead-letter queue
+- [x] Private GCS media bucket with lifecycle cleanup
+- [x] Artifact Registry
+- [x] Workload Identity for the application and KEDA
+- [x] Applied and validated in project `ai-family-media-bot`
 
-## 4. Application
+### AWS — defined, not currently deployed
 
-- [x] Create Telegram bot via BotFather, obtain token
-- [ ] Story prompts for Bedrock (age-appropriate, per-child character descriptions)
-- [ ] Illustration prompts (stylized avatars only, no real photos of minors)
-- [x] Wire real providers behind existing ports: Bedrock StoryProvider + ImageProvider, SQS QueuePort, S3 StoragePort
-- [x] End-to-end test: Telegram message -> story + image delivered
+- [x] Independent Terraform root and state configuration
+- [x] VPC, private EKS nodes, NAT, and selected VPC endpoints
+- [x] SQS jobs queue and dead-letter queue
+- [x] Private S3 media bucket with lifecycle cleanup
+- [x] ECR and IRSA roles for the application and cluster add-ons
+- [x] Terraform formatting and validation
+- [ ] Apply or restore the AWS environment when an AWS runtime is required
+
+## 3. Shared Kubernetes deployment (Helm)
+
+- [x] One schema-validated chart for both AWS and GCP
+- [x] Shared web and worker Deployments
+- [x] Provider-specific values for adapters, identity, and cloud resources
+- [x] Provider-specific KEDA scaler branches
+- [x] GCP KEDA installation and application release
+- [x] GCP worker and Spot node pool scale to zero while idle
+- [x] AWS and GCP releases lint and render successfully
+- [ ] Deploy the shared chart to AWS and verify SQS-driven scale-up
+
+## 4. GCP production verification
+
+- [x] GKE web pod healthy and ready
+- [x] Pub/Sub, GCS, Vertex AI, and Workload Identity readiness checks
+- [x] Live Gemini story and image generation from the running pod
+- [x] Telegram Bot API connectivity and polling startup
+- [x] KEDA ScaledObject healthy with an idle worker count of zero
+- [ ] Capture a clean Telegram message → Pub/Sub → worker → reply demonstration
+- [ ] Capture KEDA and GKE worker scale-up/scale-down evidence
 
 ## 5. CI/CD (GitHub Actions)
 
-- [ ] Workflow: test -> build -> push to ECR (OIDC auth, no long-lived keys)
-- [ ] Deploy step: update image tag in EKS
-- [ ] Branch protection + required checks
+- [ ] Run unit tests, Helm validation, and Terraform checks on pull requests
+- [ ] Build an AMD64 or multi-architecture container image
+- [ ] Push to Artifact Registry for GCP and ECR for AWS using OIDC
+- [ ] Promote immutable image tags through provider-specific Helm values
+- [ ] Add protected deployment environments and required checks
 
 ## 6. Observability
 
-- [ ] Decide scope: CloudWatch Container Insights vs Prometheus + Grafana
-- [ ] Metrics: queue depth, job duration, Bedrock latency, cost per story
-- [ ] Alerts: DLQ non-empty, worker crash loop
+- [x] Structured JSON application logs
+- [x] Prometheus health, job, duration, and cost metrics
+- [x] OpenTelemetry spans with no-op behavior when no exporter is configured
+- [x] KEDA scaling from Google Cloud Monitoring's Prometheus endpoint
+- [ ] Add operational dashboards
+- [ ] Alert on dead-letter messages, crash loops, and sustained queue backlog
+- [ ] Define provider-specific log and metric retention
 
-## 7. Portfolio polish
+## 7. Portfolio and operations
 
-- [ ] Top-level README: architecture diagram, FinOps section, design decisions
-- [ ] Screenshots: scale-to-zero node output, KEDA scaling event, sample story
-- [ ] Cost breakdown: what runs 24/7 vs on demand, monthly estimate
-- [ ] Teardown/bring-up instructions (destroy when idle, NAT + EKS control plane are the fixed costs)
+- [x] README reflects the shared chart and GCP-only live deployment
+- [x] Architecture diagram distinguishes live GCP from the AWS target
+- [x] GCP operating and interview runbook
+- [ ] Add screenshots of the Telegram result and scaling sequence
+- [ ] Publish a current GCP cost breakdown and budget guardrails
+- [ ] Add GCP teardown and restoration instructions
+- [ ] Add an AWS re-deployment runbook
 
 ## Working notes
 
-- Fixed hourly costs while cluster is up: EKS control plane, NAT gateway, web node. Destroy between sessions if idle for days.
+- The live fixed-cost floor is the GKE control plane, Cloud NAT, and warm web
+  node; model generation and Spot workers are usage-driven.
+- AWS is source-controlled and render-tested, but it has no current runtime
+  cost because it is not deployed.
