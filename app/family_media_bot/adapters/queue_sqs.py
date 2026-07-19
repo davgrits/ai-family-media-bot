@@ -1,7 +1,4 @@
-"""SqsQueue — QueuePort backed by Amazon SQS. Jobs travel as the Job model's
-JSON. Messages are deleted on receive (at-most-once) to keep the demo loop
-simple; production would delete after successful processing so the DLQ redrive
-catches poison messages."""
+"""SqsQueue — QueuePort backed by Amazon SQS with explicit ack/nack handling."""
 
 from __future__ import annotations
 
@@ -11,7 +8,7 @@ import logging
 import boto3
 
 from ..models import Job
-from ..ports.queue import QueuePort
+from ..ports.queue import QueueDelivery, QueuePort
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +27,7 @@ class SqsQueue(QueuePort):
             MessageBody=job.model_dump_json(),
         )
 
-    async def dequeue(self, timeout: float = 1.0) -> Job | None:
+    async def dequeue(self, timeout: float = 1.0) -> QueueDelivery | None:
         resp = await asyncio.to_thread(
             self._client.receive_message,
             QueueUrl=self._queue_url,
@@ -41,16 +38,35 @@ class SqsQueue(QueuePort):
         if not messages:
             return None
         msg = messages[0]
+        try:
+            return QueueDelivery(
+                job=Job.model_validate_json(msg["Body"]),
+                receipt=msg["ReceiptHandle"],
+            )
+        except Exception:
+            logger.exception("rejecting malformed SQS message")
+            await asyncio.to_thread(
+                self._client.change_message_visibility,
+                QueueUrl=self._queue_url,
+                ReceiptHandle=msg["ReceiptHandle"],
+                VisibilityTimeout=0,
+            )
+            return None
+
+    async def ack(self, delivery: QueueDelivery) -> None:
         await asyncio.to_thread(
             self._client.delete_message,
             QueueUrl=self._queue_url,
-            ReceiptHandle=msg["ReceiptHandle"],
+            ReceiptHandle=delivery.receipt,
         )
-        try:
-            return Job.model_validate_json(msg["Body"])
-        except Exception:
-            logger.exception("dropping malformed queue message")
-            return None
+
+    async def nack(self, delivery: QueueDelivery) -> None:
+        await asyncio.to_thread(
+            self._client.change_message_visibility,
+            QueueUrl=self._queue_url,
+            ReceiptHandle=delivery.receipt,
+            VisibilityTimeout=0,
+        )
 
     async def depth(self) -> int:
         resp = await asyncio.to_thread(

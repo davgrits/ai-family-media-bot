@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "family-media-bot.name" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "family-media-bot.labels" . | nindent 4 }}
+data:
+  QUEUE: {{ .Values.app.adapters.queue | quote }}
+  STORAGE: {{ .Values.app.adapters.storage | quote }}
+  STORY_PROVIDER: {{ .Values.app.adapters.story | quote }}
+  IMAGE_PROVIDER: {{ .Values.app.adapters.image | quote }}
+  LOG_FORMAT: {{ .Values.app.logFormat | quote }}
+  LOG_LEVEL: {{ .Values.app.logLevel | quote }}
+  {{- if eq .Values.cloud.provider "gcp" }}
+  GCP_PROJECT_ID: {{ required "gcp.projectId is required" .Values.gcp.projectId | quote }}
+  GCP_REGION: {{ .Values.gcp.region | quote }}
+  GCS_BUCKET: {{ required "gcp.mediaBucket is required" .Values.gcp.mediaBucket | quote }}
+  PUBSUB_TOPIC_NAME: {{ required "gcp.jobsTopic is required" .Values.gcp.jobsTopic | quote }}
+  PUBSUB_SUBSCRIPTION_NAME: {{ required "gcp.jobsSubscription is required" .Values.gcp.jobsSubscription | quote }}
+  VERTEX_TEXT_LOCATION: {{ .Values.gcp.vertexTextLocation | quote }}
+  VERTEX_IMAGE_LOCATION: {{ .Values.gcp.vertexImageLocation | quote }}
+  VERTEX_TEXT_MODEL_ID: {{ .Values.gcp.vertexTextModel | quote }}
+  VERTEX_IMAGE_MODEL_ID: {{ .Values.gcp.vertexImageModel | quote }}
+  {{- else if eq .Values.cloud.provider "aws" }}
+  AWS_REGION: {{ .Values.aws.region | quote }}
+  SQS_QUEUE_URL: {{ required "aws.queueUrl is required" .Values.aws.queueUrl | quote }}
+  S3_BUCKET: {{ required "aws.mediaBucket is required" .Values.aws.mediaBucket | quote }}
+  BEDROCK_TEXT_MODEL_ID: {{ .Values.aws.bedrockTextModel | quote }}
+  BEDROCK_IMAGE_MODEL_ID: {{ .Values.aws.bedrockImageModel | quote }}
+  BEDROCK_IMAGE_REGION: {{ .Values.aws.bedrockImageRegion | quote }}
+  {{- end }}

@@ -1,4 +1,4 @@
-.PHONY: help venv install run demo docker-build docker-run smoke clean
+.PHONY: help venv install test helm-lint helm-lint-aws helm-lint-gcp helm-lint-addons run demo docker-build docker-run smoke clean
 
 APP_DIR := app
 IMAGE   := family-media-bot:dev
@@ -8,6 +8,8 @@ help:
 	@echo "Targets:"
 	@echo "  make venv          Create app/.venv"
 	@echo "  make install       Install runtime deps into the venv"
+	@echo "  make test          Run the Python unit tests"
+	@echo "  make helm-lint     Lint and render the AWS and GCP Helm releases"
 	@echo "  make run           Run the service locally (fake providers, no AWS)"
 	@echo "  make demo          Run the live demo (Telegram polling + Bedrock + SQS + S3; needs app/.env)"
 	@echo "  make docker-build  Build the container image"
@@ -19,6 +21,34 @@ venv:
 
 install: venv
 	cd $(APP_DIR) && ./.venv/bin/pip install -U pip && ./.venv/bin/pip install -r requirements.txt
+
+test:
+	cd $(APP_DIR) && ./.venv/bin/python -m unittest discover -s tests -v
+
+helm-lint: helm-lint-aws helm-lint-gcp helm-lint-addons
+
+helm-lint-aws:
+	helm lint deploy/charts/family-media-bot \
+		-f deploy/values/aws.yaml
+	helm template family-media-bot-aws deploy/charts/family-media-bot \
+		--namespace app \
+		-f deploy/values/aws.yaml >/dev/null
+
+helm-lint-gcp:
+	helm lint deploy/charts/family-media-bot \
+		-f deploy/values/gcp.yaml
+	helm template family-media-bot-gcp deploy/charts/family-media-bot \
+		--namespace app \
+		-f deploy/values/gcp.yaml >/dev/null
+
+helm-lint-addons:
+	helm template keda-gcp kedacore/keda --version 2.20.1 \
+		--namespace keda -f deploy/addons/gcp/keda-values.yaml >/dev/null
+	helm template keda-aws kedacore/keda --version 2.20.1 \
+		--namespace keda -f deploy/addons/aws/keda-values.yaml >/dev/null
+	helm template cluster-autoscaler autoscaler/cluster-autoscaler \
+		--namespace kube-system \
+		-f deploy/addons/aws/cluster-autoscaler-values.yaml >/dev/null
 
 run:
 	cd $(APP_DIR) && ./.venv/bin/python -m family_media_bot

@@ -28,10 +28,10 @@ class Settings(BaseSettings):
     log_format: Literal["json", "console"] = "json"
 
     # --- Swap points (interfaces) ---
-    queue: Literal["inmemory", "sqs"] = "inmemory"
-    story_provider: Literal["fake", "bedrock"] = "fake"
-    image_provider: Literal["fake", "bedrock"] = "fake"
-    storage: Literal["local", "s3"] = "local"
+    queue: Literal["inmemory", "sqs", "pubsub"] = "inmemory"
+    story_provider: Literal["fake", "bedrock", "vertex"] = "fake"
+    image_provider: Literal["fake", "bedrock", "vertex"] = "fake"
+    storage: Literal["local", "s3", "gcs"] = "local"
     local_storage_dir: str = "./var/media"
 
     # --- Telegram ---
@@ -55,6 +55,19 @@ class Settings(BaseSettings):
     # text-to-image model, but only in us-west-2 — hence the separate region.
     bedrock_image_model_id: str = "stability.stable-image-core-v1:1"
     bedrock_image_region: str = "us-west-2"
+
+    # --- GCP / Vertex AI / GCS / Pub/Sub ---
+    # These use Application Default Credentials. On GKE, Workload Identity
+    # provides them; locally, use `gcloud auth application-default login`.
+    gcp_project_id: str = ""
+    gcp_region: str = "us-central1"
+    gcs_bucket: str = ""
+    pubsub_topic_name: str = ""
+    pubsub_subscription_name: str = ""
+    vertex_text_location: str = "global"
+    vertex_image_location: str = "us-central1"
+    vertex_text_model_id: str = "gemini-3.5-flash"
+    vertex_image_model_id: str = "gemini-2.5-flash-image"
 
     # --- Story shaping ---
     story_max_words: int = 220

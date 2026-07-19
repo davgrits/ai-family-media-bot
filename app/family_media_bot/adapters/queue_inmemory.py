@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 
 from ..models import Job
-from ..ports.queue import QueuePort
+from ..ports.queue import QueueDelivery, QueuePort
 
 
 class InMemoryQueue(QueuePort):
@@ -19,11 +19,18 @@ class InMemoryQueue(QueuePort):
     async def enqueue(self, job: Job) -> None:
         await self._q.put(job)
 
-    async def dequeue(self, timeout: float = 1.0) -> Job | None:
+    async def dequeue(self, timeout: float = 1.0) -> QueueDelivery | None:
         try:
-            return await asyncio.wait_for(self._q.get(), timeout=timeout)
+            return QueueDelivery(job=await asyncio.wait_for(self._q.get(), timeout=timeout))
         except asyncio.TimeoutError:
             return None
+
+    async def ack(self, delivery: QueueDelivery) -> None:
+        self._q.task_done()
+
+    async def nack(self, delivery: QueueDelivery) -> None:
+        self._q.task_done()
+        await self._q.put(delivery.job)
 
     async def depth(self) -> int:
         return self._q.qsize()

@@ -1,0 +1,300 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["cloud", "image", "app", "serviceAccount", "web", "worker"],
+  "additionalProperties": true,
+  "properties": {
+    "cloud": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider"],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": ["aws", "gcp"]
+        }
+      }
+    },
+    "image": {
+      "type": "object",
+      "required": ["repository", "tag"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        }
+      }
+    },
+    "app": {
+      "type": "object",
+      "required": [
+        "telegramSecretName",
+        "workerConcurrency",
+        "logLevel",
+        "logFormat",
+        "adapters"
+      ],
+      "properties": {
+        "telegramSecretName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workerConcurrency": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "adapters": {
+          "type": "object",
+          "required": ["queue", "storage", "story", "image"],
+          "properties": {
+            "queue": {
+              "type": "string",
+              "enum": ["sqs", "pubsub"]
+            },
+            "storage": {
+              "type": "string",
+              "enum": ["s3", "gcs"]
+            },
+            "story": {
+              "type": "string",
+              "enum": ["bedrock", "vertex"]
+            },
+            "image": {
+              "type": "string",
+              "enum": ["bedrock", "vertex"]
+            }
+          }
+        }
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "required": ["annotations"],
+      "properties": {
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "gcp": {
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "region": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mediaBucket": {
+          "type": "string",
+          "minLength": 1
+        },
+        "jobsTopic": {
+          "type": "string",
+          "minLength": 1
+        },
+        "jobsSubscription": {
+          "type": "string",
+          "minLength": 1
+        },
+        "vertexTextLocation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "vertexImageLocation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "vertexTextModel": {
+          "type": "string",
+          "minLength": 1
+        },
+        "vertexImageModel": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "aws": {
+      "type": "object",
+      "properties": {
+        "region": {
+          "type": "string",
+          "minLength": 1
+        },
+        "queueUrl": {
+          "type": "string",
+          "pattern": "^https://sqs\\.[^/]+\\.amazonaws\\.com/"
+        },
+        "mediaBucket": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bedrockTextModel": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bedrockImageModel": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bedrockImageRegion": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "web": {
+      "type": "object",
+      "required": ["replicaCount", "nodeSelector", "resources"],
+      "properties": {
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "worker": {
+      "type": "object",
+      "required": [
+        "minReplicaCount",
+        "maxReplicaCount",
+        "pollingInterval",
+        "cooldownPeriod",
+        "nodeSelector",
+        "tolerations",
+        "resources"
+      ],
+      "properties": {
+        "minReplicaCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxReplicaCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pollingInterval": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cooldownPeriod": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "cloud": {
+            "properties": {
+              "provider": {
+                "const": "gcp"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": ["gcp"],
+        "properties": {
+          "app": {
+            "properties": {
+              "adapters": {
+                "properties": {
+                  "queue": { "const": "pubsub" },
+                  "storage": { "const": "gcs" },
+                  "story": { "const": "vertex" },
+                  "image": { "const": "vertex" }
+                }
+              }
+            }
+          },
+          "serviceAccount": {
+            "properties": {
+              "annotations": {
+                "required": ["iam.gke.io/gcp-service-account"]
+              }
+            }
+          },
+          "gcp": {
+            "required": [
+              "projectId",
+              "region",
+              "mediaBucket",
+              "jobsTopic",
+              "jobsSubscription",
+              "vertexTextLocation",
+              "vertexImageLocation",
+              "vertexTextModel",
+              "vertexImageModel"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "cloud": {
+            "properties": {
+              "provider": {
+                "const": "aws"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": ["aws"],
+        "properties": {
+          "app": {
+            "properties": {
+              "adapters": {
+                "properties": {
+                  "queue": { "const": "sqs" },
+                  "storage": { "const": "s3" },
+                  "story": { "const": "bedrock" },
+                  "image": { "const": "bedrock" }
+                }
+              }
+            }
+          },
+          "serviceAccount": {
+            "properties": {
+              "annotations": {
+                "required": ["eks.amazonaws.com/role-arn"]
+              }
+            }
+          },
+          "aws": {
+            "required": [
+              "region",
+              "queueUrl",
+              "mediaBucket",
+              "bedrockTextModel",
+              "bedrockImageModel",
+              "bedrockImageRegion"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

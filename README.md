@@ -2,18 +2,16 @@
 
 A portfolio DevOps project: a Telegram bot that turns a family's request into a
 short, age-appropriate **bedtime story** plus **one illustration**, designed to
-run on **AWS (EKS + Bedrock)** — but built so the application runs **end-to-end
-on a laptop with no AWS**.
+run on **AWS (EKS + Bedrock)** or **GCP (GKE + Vertex AI)**, while still running
+end-to-end on a laptop with no cloud account.
 
 This repo is split so the **infrastructure is built once** and the **brains swap
 in later** without touching Terraform. The frozen interface between the two is
 [`docs/api-contract.md`](docs/api-contract.md) — the source of truth.
 
-> **Status:** working end-to-end against real AWS — a Telegram message in, a
-> Bedrock-generated story + illustration back in ~15s, media persisted to S3
-> (see **Local demo** below). Terraform is fully applied and converged
-> (`terraform plan` clean). Next up: k8s manifests, KEDA scale-out
-> verification, and CI — see [ROADMAP.md](ROADMAP.md).
+> **Status:** AWS works end-to-end. The GCP-native Pub/Sub, GCS, Vertex AI,
+> GKE, Helm, Workload Identity, and KEDA path is implemented and live-verified.
+> See the [GCP interview runbook](docs/gcp-interview-runbook.md).
 
 ---
 
@@ -34,7 +32,7 @@ flowchart LR
                 WEB["web tier · on-demand, warm<br/>receive update, enqueue<br/>healthz / readyz / metrics"]
                 WRK["worker tier · Spot · 0 to N<br/>taint workload=jobs<br/>KEDA + cluster-autoscaler"]
             end
-            VPCE["VPC endpoints<br/>bedrock-runtime · sqs · sts<br/>+ free S3 gateway"]
+            VPCE["VPC endpoints · all AWS calls private<br/>bedrock-runtime · sqs · sts<br/>+ free S3 gateway"]
         end
         SQS["SQS jobs queue<br/>+ DLQ, redrive after 3"]
         BR["Bedrock<br/>Claude Haiku · story, us-east-1<br/>Stability Image Core · illustration, us-west-2"]
@@ -49,7 +47,8 @@ flowchart LR
     WRK -->|InvokeModel| BR
     WRK -->|story .txt + image .png| S3
     WRK -->|reply: story + photo| NAT
-    EKS -. all AWS calls stay on private paths .- VPCE
+    WEB -.-> VPCE
+    WRK -.-> VPCE
     IRSA -. per-service-account credentials .- EKS
 ```
 
@@ -62,12 +61,12 @@ Two independently-scaling tiers (per the contract):
 Everything AWS-shaped sits behind an interface, so the same app logic runs with
 fakes locally and real services in prod:
 
-| Concern  | Interface       | Dev impl (now)                | Prod impl (later)      |
-|----------|-----------------|-------------------------------|------------------------|
-| Queue    | `QueuePort`     | `InMemoryQueue`               | `SqsQueue`             |
-| Story    | `StoryProvider` | `FakeStoryProvider` (canned)  | `BedrockStoryProvider` |
-| Image    | `ImageProvider` | `FakeImageProvider` (PNG)     | `BedrockImageProvider` |
-| Storage  | `StoragePort`   | `LocalDirStorage`             | `S3Storage`            |
+| Concern | Interface | Local | AWS | GCP |
+|---|---|---|---|---|
+| Queue | `QueuePort` | `InMemoryQueue` | `SqsQueue` | `PubSubQueue` |
+| Story | `StoryProvider` | `FakeStoryProvider` | `BedrockStoryProvider` | `VertexStoryProvider` |
+| Image | `ImageProvider` | `FakeImageProvider` | `BedrockImageProvider` | `VertexImageProvider` |
+| Storage | `StoragePort` | `LocalDirStorage` | `S3Storage` | `GcsStorage` |
 
 Each is selected by an environment variable; both sides are real — the same
 app logic runs with fakes on a laptop and against Bedrock/SQS/S3 in the demo.
@@ -111,8 +110,13 @@ Every decision below is also documented in-line next to the code that makes it
 ## Repo layout — `app/` vs `infra/`
 
 ```
-app/             the Python service — runs locally with fakes, or against real AWS
-infra/           Terraform (applied) — VPC, EKS, SQS, S3, ECR, IAM/IRSA
+app/             the Python service — local, AWS, and GCP adapters
+deploy/charts/   shared AWS/GCP Helm application chart
+deploy/values/   provider-specific application values
+deploy/addons/   provider-specific KEDA/autoscaler Helm values
+deploy/legacy/   historical manifests, not a production deployment path
+infra/aws/       AWS Terraform — VPC, EKS, SQS, S3, ECR, IAM/IRSA
+infra/gcp/       GCP Terraform — VPC, GKE, Pub/Sub, GCS, Artifact Registry, Workload Identity
 .github/workflows/   CI (next up)
 observability/   dashboards / collector config (later)
 docs/            the frozen API & job contract
@@ -137,7 +141,7 @@ family_media_bot/
   logging_setup.py  structured JSON logs      telemetry.py  OpenTelemetry (OTLP)
   metrics.py      Prometheus metrics
   ports/          QueuePort, StoryProvider, ImageProvider, StoragePort
-  adapters/       *_fake / *_inmemory / *_localdir (dev) + *_bedrock / *_s3 (stubs)
+  adapters/       local, AWS, and GCP implementations
 ```
 
 ---
@@ -234,16 +238,17 @@ Every setting is an environment variable with a safe local default — see
 [`.env.example`](.env.example) for the annotated list. The ones you'll touch
 most:
 
-- `STORY_PROVIDER` / `IMAGE_PROVIDER` — `fake` (default) or `bedrock` (stub).
-- `STORAGE` — `local` (default) or `s3` (stub). `QUEUE` — `inmemory` (default).
+- `STORY_PROVIDER` / `IMAGE_PROVIDER` — `fake`, `bedrock`, or `vertex`.
+- `STORAGE` — `local`, `s3`, or `gcs`; `QUEUE` — `inmemory`, `sqs`, or `pubsub`.
 - `RUN_MODE` — `all` (default; web + in-process worker), or `web` / `worker` for
-  the prod tier split (which uses SQS as the shared queue).
+  the prod tier split (which uses SQS or Pub/Sub as the shared queue).
 - `TELEGRAM_BOT_TOKEN` — leave blank to log sends instead of calling Telegram.
 - `OTEL_EXPORTER_OTLP_ENDPOINT` — set to export traces; unset = safe no-op.
 
 ## Infrastructure
 
-Terraform for the AWS environment lives in [`infra/`](infra/): a single root
+Terraform is split into independent cloud roots under [`infra/`](infra/).
+The existing AWS environment lives in [`infra/aws/`](infra/aws/): a single root
 module (one state file, no dev/prod split) with one `.tf` file per concern —
 2-AZ VPC with a single NAT gateway, VPC endpoints so sensitive and constant
 AWS traffic (Bedrock, SQS, S3, STS) never leaves the AWS backbone (ECR pulls
@@ -255,7 +260,13 @@ KEDA, cluster-autoscaler). Community modules cover VPC/EKS boilerplate;
 everything carrying a design decision is raw resources. Staged apply order:
 **bootstrap** (state bucket, by hand) → **network** (VPC +
 endpoints) → **data plane** (SQS/S3/ECR) → **eks** → **irsa** — full commands
-in [`infra/README.md`](infra/README.md).
+in [`infra/aws/README.md`](infra/aws/README.md). The GCP/GKE foundation is in
+[`infra/gcp/`](infra/gcp/) and has its own state backend and deployment guide.
+Both Terraform roots are consumed by the shared Helm chart in
+[`deploy/charts/family-media-bot/`](deploy/charts/family-media-bot/).
+[`deploy/values/aws.yaml`](deploy/values/aws.yaml) selects SQS, S3, Bedrock,
+and IRSA; [`deploy/values/gcp.yaml`](deploy/values/gcp.yaml) selects Pub/Sub,
+GCS, Vertex AI, and Workload Identity. The workload templates stay identical.
 
 ## Observability
 

@@ -17,6 +17,7 @@ from ..config import Settings
 from ..models import Mode
 from ..ports.story import StoryProvider, StoryResult
 from ..prompts import BEDTIME_SYSTEM_PROMPT
+from .story_common import split_illustration_hint
 
 logger = logging.getLogger(__name__)
 
@@ -24,27 +25,12 @@ logger = logging.getLogger(__name__)
 _PRICE_IN_PER_MTOK = 1.00
 _PRICE_OUT_PER_MTOK = 5.00
 
-_ILLUSTRATION_MARKER = "ILLUSTRATION:"
-
 # 60s read timeout + one retry on retryable failures (throttling, timeouts).
 _BOTO_CONFIG = Config(
     connect_timeout=5,
     read_timeout=60,
     retries={"max_attempts": 2, "mode": "standard"},
 )
-
-
-def _split_illustration_hint(raw: str) -> tuple[str, str]:
-    """Separate the story body from the trailing ILLUSTRATION line (if any)."""
-    story_lines: list[str] = []
-    hint = ""
-    for line in raw.splitlines():
-        if line.strip().upper().startswith(_ILLUSTRATION_MARKER):
-            hint = line.strip()[len(_ILLUSTRATION_MARKER) :].strip()
-        else:
-            story_lines.append(line)
-    return "\n".join(story_lines).strip(), hint
-
 
 class BedrockStoryProvider(StoryProvider):
     def __init__(self, settings: Settings) -> None:
@@ -66,7 +52,7 @@ class BedrockStoryProvider(StoryProvider):
     async def generate(self, mode: Mode, prompt: str) -> StoryResult:
         resp = await asyncio.to_thread(self._invoke, prompt)
         raw = resp["output"]["message"]["content"][0]["text"]
-        text, hint = _split_illustration_hint(raw)
+        text, hint = split_illustration_hint(raw)
         usage = resp.get("usage", {})
         tokens_in = int(usage.get("inputTokens", 0))
         tokens_out = int(usage.get("outputTokens", 0))

@@ -20,3 +20,13 @@ app/var/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# Terraform state and per-environment inputs can contain infrastructure
+# metadata or secrets. Provider dependency locks remain committed.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+tfplan
+*.tfplan

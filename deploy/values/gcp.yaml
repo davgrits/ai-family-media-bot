@@ -1,0 +1,28 @@
+cloud:
+  provider: gcp
+
+image:
+  repository: us-central1-docker.pkg.dev/ai-family-media-bot/ai-family-media-bot/family-media-bot
+  tag: 8cc4af0-20260719-gemini
+
+app:
+  adapters:
+    queue: pubsub
+    storage: gcs
+    story: vertex
+    image: vertex
+
+serviceAccount:
+  annotations:
+    iam.gke.io/gcp-service-account: family-media-app@ai-family-media-bot.iam.gserviceaccount.com
+
+gcp:
+  projectId: ai-family-media-bot
+  region: us-central1
+  mediaBucket: ai-family-media-bot-ai-family-media-bot-media
+  jobsTopic: ai-family-media-bot-jobs
+  jobsSubscription: ai-family-media-bot-jobs
+  vertexTextLocation: global
+  vertexImageLocation: us-central1
+  vertexTextModel: gemini-3.5-flash
+  vertexImageModel: gemini-2.5-flash-image

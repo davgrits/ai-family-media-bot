@@ -1,0 +1,55 @@
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ include "family-media-bot.name" . }}-keda-identity
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "family-media-bot.labels" . | nindent 4 }}
+spec:
+  {{- if eq .Values.cloud.provider "gcp" }}
+  # The KEDA operator KSA is annotated with the separate Terraform-created
+  # GSA, so the scaler can only observe subscription metrics.
+  podIdentity:
+    provider: gcp
+  {{- else if eq .Values.cloud.provider "aws" }}
+  # The KEDA operator obtains AWS credentials through its IRSA annotation.
+  podIdentity:
+    provider: aws
+  {{- end }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "family-media-bot.name" . }}-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "family-media-bot.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ include "family-media-bot.name" . }}-worker
+  minReplicaCount: {{ .Values.worker.minReplicaCount }}
+  maxReplicaCount: {{ .Values.worker.maxReplicaCount }}
+  pollingInterval: {{ .Values.worker.pollingInterval }}
+  cooldownPeriod: {{ .Values.worker.cooldownPeriod }}
+  triggers:
+    {{- if eq .Values.cloud.provider "gcp" }}
+    # KEDA's gcp-pubsub scaler is deprecated because it relies on MQL. Google
+    # exposes Pub/Sub metrics through its managed Prometheus API, so use KEDA's
+    # supported Prometheus scaler without running another metrics service.
+    - type: prometheus
+      authenticationRef:
+        name: {{ include "family-media-bot.name" . }}-keda-identity
+      metadata:
+        serverAddress: {{ printf "https://monitoring.googleapis.com/v1/projects/%s/location/global/prometheus" .Values.gcp.projectId | quote }}
+        query: {{ printf "max({\"__name__\"=\"pubsub.googleapis.com/subscription/num_undelivered_messages\",\"monitored_resource\"=\"pubsub_subscription\",\"subscription_id\"=\"%s\"}) or vector(0)" .Values.gcp.jobsSubscription | quote }}
+        threshold: "1"
+        activationThreshold: "0"
+    {{- else if eq .Values.cloud.provider "aws" }}
+    - type: aws-sqs-queue
+      authenticationRef:
+        name: {{ include "family-media-bot.name" . }}-keda-identity
+      metadata:
+        queueURL: {{ required "aws.queueUrl is required" .Values.aws.queueUrl | quote }}
+        awsRegion: {{ .Values.aws.region | quote }}
+        queueLength: "1"
+    {{- end }}

@@ -1,3 +1,4 @@
+# AWS EKS KEDA identity and scheduling.
 serviceAccount:
   operator:
     create: true

@@ -1,0 +1,51 @@
+# Legacy AWS manifest retained for history. Helm is the canonical deployment.
+# KEDA scaling for the worker tier: 0 pods when the queue is empty, one pod
+# per queued job (up to the cap) when it isn't. Pods scale first; if they
+# don't fit, cluster-autoscaler adds Spot nodes — two loops, one signal.
+#
+# Auth chain, spelled out: this TriggerAuthentication says "use the KEDA
+# operator's own AWS identity" — the keda-operator service account is IRSA-
+# annotated (deploy/addons/aws/keda-values.yaml) with a role whose ONLY permission
+# is sqs:GetQueueAttributes on the jobs queue (infra/aws/irsa.tf). KEDA reads the
+# queue depth with that role; the app pods never share their identity with
+# KEDA, and KEDA cannot consume or send messages.
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: keda-operator-identity
+  namespace: app # must live in the same namespace as the ScaledObject
+spec:
+  podIdentity:
+    provider: aws
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: family-media-bot-worker
+  namespace: app
+spec:
+  scaleTargetRef:
+    name: family-media-bot-worker # the Deployment KEDA drives
+
+  # 0 replicas when idle — this is the scale-to-zero demo. KEDA itself handles
+  # the 0<->1 transition (an HPA alone cannot reach 0); beyond 1 it delegates
+  # to the HPA it creates.
+  minReplicaCount: 0
+  # Pod cap. Nodes are separately capped at 5 (infra: worker_max_size) —
+  # pods bin-pack ~4 per t3.medium at the configured requests, so 10 pods
+  # never exhausts the node budget. Both caps bound a queue-flood blast radius.
+  maxReplicaCount: 10
+
+  pollingInterval: 15 # check queue depth every 15s (default 30) — snappier pickup
+  cooldownPeriod: 300 # wait 5 min of empty queue before dropping to 0 (avoids flapping)
+
+  triggers:
+    - type: aws-sqs-queue
+      authenticationRef:
+        name: keda-operator-identity
+      metadata:
+        queueURL: https://sqs.us-east-1.amazonaws.com/684049557114/ai-family-media-bot-jobs
+        awsRegion: us-east-1
+        # Target 1 visible message per pod: a job means seconds of Bedrock
+        # latency, so parallelism per message is the point of this tier.
+        queueLength: "1"

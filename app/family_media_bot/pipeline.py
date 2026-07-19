@@ -36,7 +36,7 @@ class Pipeline:
         self._storage = storage
         self._telegram = telegram
 
-    async def process(self, job: Job) -> None:
+    async def process(self, job: Job) -> bool:
         mode = job.mode.value
         started = time.perf_counter()
 
@@ -97,6 +97,7 @@ class Pipeline:
                         "illustration_prompt": illustration_prompt,
                     },
                 )
+                return True
             except Exception as exc:
                 metrics.JOBS_PROCESSED.labels(mode=mode, status="error").inc()
                 span.record_exception(exc)
@@ -112,3 +113,4 @@ class Pipeline:
                     logger.exception(
                         "failed to send error message", extra={"job_id": job.job_id}
                     )
+                return False

@@ -1,0 +1,90 @@
+# Legacy AWS manifest retained for history. Helm is the canonical deployment.
+# Web tier: always warm, receives Telegram traffic, enqueues jobs, serves
+# health/metrics. Runs in LONG-POLLING mode (TELEGRAM_POLLING=true): the pod
+# pulls updates out through the NAT gateway, so no Service/Ingress/ALB is
+# needed — there is deliberately no inbound path in the infra. Switching to
+# webhooks later means: an Ingress/ALB + TELEGRAM_POLLING=false + registering
+# the webhook URL; the /webhook endpoint already exists.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: family-media-bot-web
+  namespace: app
+  labels:
+    app: family-media-bot
+    tier: web
+spec:
+  # Exactly ONE replica, and Recreate instead of RollingUpdate: Telegram
+  # allows a single getUpdates consumer per token (409 otherwise). A rolling
+  # update would briefly run old+new pollers side by side; Recreate accepts a
+  # few seconds of downtime to guarantee never-two-pollers.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: family-media-bot
+      tier: web
+  template:
+    metadata:
+      labels:
+        app: family-media-bot
+        tier: web
+    spec:
+      serviceAccountName: family-media-bot
+      nodeSelector:
+        role: web # the on-demand, always-warm node group (infra/aws/eks.tf)
+      containers:
+        - name: web
+          # Logical name; kustomization.yaml maps it to the real ECR URL + tag.
+          image: family-media-bot
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: family-media-bot-config
+          env:
+            - name: RUN_MODE
+              value: "web" # enqueue-only: no in-process worker in this tier
+            - name: TELEGRAM_POLLING
+              value: "true"
+            - name: TELEGRAM_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: telegram-bot-token
+                  key: TELEGRAM_BOT_TOKEN
+          # Liveness = "is the process alive" — /healthz touches nothing
+          # downstream, so a Bedrock/SQS outage can never restart-loop the pod.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          # Readiness = "are my deps reachable" — /readyz does cheap checks
+          # only (SQS GetQueueAttributes, S3 HeadBucket, credential lookup),
+          # never a paid Bedrock invoke.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            # Enqueue + poll is I/O-bound and tiny; requests sized so the web
+            # node (t3.small) also fits the KEDA components. Memory limit but
+            # no CPU limit: exceeding memory means a leak (kill it), while a
+            # CPU limit would only add throttling latency.
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true # image already runs as uid 10001
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault

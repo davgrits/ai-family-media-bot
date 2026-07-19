@@ -1,0 +1,25 @@
+# Legacy AWS Kustomize deployment retained for history; use the Helm chart.
+# This file shows how the former deployment aggregated and pinned its image.
+#
+# The Deployments reference the logical image name "family-media-bot"; the
+# images transformer below rewrites it to the real ECR URL + tag. Tags are
+# IMMUTABLE in ECR (one tag per build, e.g. a git SHA), so a deploy is:
+#   kustomize edit set image family-media-bot=<ecr-url>:<git-sha>
+#
+# secret.telegram.example.yaml is deliberately NOT listed: the real Secret is
+# created out-of-band (see that file) so no token ever enters the repo.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - configmap.yaml
+  - deployment-web.yaml
+  - deployment-worker.yaml
+  - scaledobject.yaml
+
+images:
+  - name: family-media-bot
+    newName: 684049557114.dkr.ecr.us-east-1.amazonaws.com/ai-family-media-bot
+    newTag: dev # placeholder — set to a git SHA at deploy time (see header)

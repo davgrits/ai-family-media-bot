@@ -1,3 +1,4 @@
+# AWS EKS add-on values; the application itself is deployed by the shared chart.
 autoDiscovery:
   clusterName: ai-family-media-bot
 

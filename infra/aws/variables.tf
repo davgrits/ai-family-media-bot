@@ -43,6 +43,6 @@ variable "bedrock_image_model_id" {
     in-region keeps traffic on the bedrock-runtime VPC endpoint. Revisit when AWS announces EOL
     or ships an in-region successor. Migration is a default change here + ImageProvider schema tweak.
   EOT
-  type    = string
-  default = "amazon.nova-canvas-v1:0"
+  type        = string
+  default     = "amazon.nova-canvas-v1:0"
 }

@@ -65,3 +65,8 @@ def setup_logging(level: str = "INFO", fmt: str = "json") -> None:
         lg = logging.getLogger(name)
         lg.handlers.clear()
         lg.propagate = True
+
+    # httpx includes full request URLs in INFO records. Telegram embeds the bot
+    # token in the URL path, so dependency request logs must never be emitted.
+    for name in ("httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)

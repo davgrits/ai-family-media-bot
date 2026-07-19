@@ -1,0 +1,57 @@
+# Portable workload defaults. Select a provider with deploy/values/aws.yaml or
+# deploy/values/gcp.yaml; the active provider's required values are validated.
+cloud:
+  provider: gcp
+
+image:
+  # Full image repository without a tag. Artifact Registry and ECR repository
+  # outputs have different path shapes, so templates must not append a name.
+  repository: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+
+app:
+  name: family-media-bot
+  telegramSecretName: telegram-bot-token
+  workerConcurrency: 1
+  logLevel: INFO
+  logFormat: json
+  adapters:
+    queue: pubsub
+    storage: gcs
+    story: vertex
+    image: vertex
+
+serviceAccount:
+  annotations: {}
+
+web:
+  replicaCount: 1
+  nodeSelector:
+    role: web
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+worker:
+  # KEDA owns the replica count. This is only the capacity envelope.
+  minReplicaCount: 0
+  maxReplicaCount: 10
+  pollingInterval: 15
+  cooldownPeriod: 300
+  nodeSelector:
+    role: worker
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: jobs
+      effect: NoSchedule
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      memory: 1Gi

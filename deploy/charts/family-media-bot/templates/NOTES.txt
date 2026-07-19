@@ -1,0 +1,11 @@
+Release {{ .Release.Name }} is installed for {{ .Values.cloud.provider | upper }} in namespace {{ .Release.Namespace }}.
+
+Check the warm web tier:
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/component=web
+
+Check KEDA and the scale-to-zero worker:
+  kubectl -n {{ .Release.Namespace }} get scaledobject
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/component=worker
+
+Follow application logs:
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "family-media-bot.name" . }}-web -f

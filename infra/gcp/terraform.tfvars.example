@@ -1,0 +1,13 @@
+# Copy to terraform.tfvars (which stays uncommitted) and set your values.
+project_id       = "your-gcp-project-id"
+region           = "us-central1"
+cluster_location = "us-central1-a"
+
+# One e2-medium has enough allocatable capacity for GKE system pods, KEDA, and
+# the always-on bot. The worker pool remains Spot and scales from zero.
+web_machine_type = "e2-medium"
+web_max_nodes    = 1
+
+# Keep true in normal operation. Set false only immediately before an
+# intentional `terraform destroy`, then set it back if the cluster remains.
+deletion_protection = true

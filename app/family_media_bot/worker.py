@@ -30,14 +30,17 @@ class Worker:
     async def _run(self, index: int) -> None:
         while not self._stop.is_set():
             try:
-                job = await self._queue.dequeue(timeout=1.0)
-                if job is None:
+                delivery = await self._queue.dequeue(timeout=1.0)
+                if delivery is None:
                     continue
                 try:
                     metrics.QUEUE_DEPTH.set(await self._queue.depth())
                 except Exception:
                     pass
-                await self._pipeline.process(job)
+                if await self._pipeline.process(delivery.job):
+                    await self._queue.ack(delivery)
+                else:
+                    await self._queue.nack(delivery)
             except asyncio.CancelledError:
                 break
             except Exception:

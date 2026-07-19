@@ -1,0 +1,38 @@
+# Install KEDA with this file. The annotation links its operator Kubernetes
+# ServiceAccount to the least-privilege GSA created by infra/gcp.
+serviceAccount:
+  operator:
+    create: true
+    name: keda-operator
+    annotations:
+      iam.gke.io/gcp-service-account: family-media-keda@ai-family-media-bot.iam.gserviceaccount.com
+
+# KEDA must remain schedulable while worker Spot nodes scale to zero.
+nodeSelector:
+  role: web
+
+# KEDA's default 100m request per controller is sized for busier clusters.
+# These requests are sufficient for this single-bot demo and let the always-on
+# control plane fit on one shared-core e2-medium node.
+resources:
+  operator:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  metricServer:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  webhooks:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
