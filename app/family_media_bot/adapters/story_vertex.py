@@ -48,6 +48,16 @@ class VertexStoryProvider(StoryProvider):
         if not settings.gcp_project_id:
             raise ValueError("STORY_PROVIDER=vertex requires GCP_PROJECT_ID to be set")
         self._model_id = settings.vertex_text_model_id
+        # Fail at startup, not per job. Falling back to a $0 price meant a
+        # model-id bump silently zeroed cost reporting and nothing noticed;
+        # crashing here surfaces it at deploy time, while --atomic can still
+        # roll the release back.
+        if self._model_id not in _TEXT_PRICES_PER_MILLION_TOKENS:
+            raise ValueError(
+                f"no price entry for text model {self._model_id!r}. Add it to "
+                "_TEXT_PRICES_PER_MILLION_TOKENS so per-job cost stays honest. "
+                f"Priced: {sorted(_TEXT_PRICES_PER_MILLION_TOKENS)}"
+            )
         self._max_words = settings.story_max_words
         self._max_output_tokens = self._max_words * _TOKENS_PER_WORD + _THINKING_TOKEN_RESERVE
         self._location = settings.vertex_text_location
@@ -104,9 +114,7 @@ class VertexStoryProvider(StoryProvider):
         # candidates_token_count, so charging only for visible output
         # understates the real cost of every job.
         tokens_thought = int(getattr(usage, "thoughts_token_count", 0) or 0)
-        input_price, output_price = _TEXT_PRICES_PER_MILLION_TOKENS.get(
-            self._model_id, (0.0, 0.0)
-        )
+        input_price, output_price = _TEXT_PRICES_PER_MILLION_TOKENS[self._model_id]
         if self._location != "global":
             input_price *= 1.1
             output_price *= 1.1

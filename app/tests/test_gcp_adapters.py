@@ -442,6 +442,24 @@ class VertexAdapterTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "no generated image"):
             await provider.generate("a friendly star")
 
+    @patch("family_media_bot.adapters.story_vertex.genai.Client")
+    def test_unpriced_text_model_fails_at_construction(self, _client_class) -> None:
+        # Falling back to $0 meant bumping a model id in env silently zeroed
+        # cost reporting. Refuse to start instead.
+        settings = Settings(gcp_project_id="demo-project", vertex_text_model_id="gemini-9-ultra")
+
+        with self.assertRaisesRegex(ValueError, "no price entry for text model"):
+            VertexStoryProvider(settings)
+
+    @patch("family_media_bot.adapters.image_vertex.genai.Client")
+    def test_unpriced_image_model_fails_at_construction(self, _client_class) -> None:
+        settings = Settings(
+            gcp_project_id="demo-project", vertex_image_model_id="imagen-9-ultra"
+        )
+
+        with self.assertRaisesRegex(ValueError, "no price entry for image model"):
+            VertexImageProvider(settings)
+
 
 if __name__ == "__main__":
     unittest.main()

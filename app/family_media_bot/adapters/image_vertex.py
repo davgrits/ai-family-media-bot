@@ -29,6 +29,14 @@ class VertexImageProvider(ImageProvider):
         if not settings.gcp_project_id:
             raise ValueError("IMAGE_PROVIDER=vertex requires GCP_PROJECT_ID to be set")
         self._model_id = settings.vertex_image_model_id
+        # See VertexStoryProvider: an unpriced model is a configuration error,
+        # not a $0 image.
+        if self._model_id not in _IMAGE_COST_PER_IMAGE_USD:
+            raise ValueError(
+                f"no price entry for image model {self._model_id!r}. Add it to "
+                "_IMAGE_COST_PER_IMAGE_USD so per-job cost stays honest. "
+                f"Priced: {sorted(_IMAGE_COST_PER_IMAGE_USD)}"
+            )
         self._client = genai.Client(
             vertexai=True,
             project=settings.gcp_project_id,
@@ -79,7 +87,7 @@ class VertexImageProvider(ImageProvider):
         return ImageResult(
             png_bytes=image_bytes,
             model_id=self._model_id,
-            cost_usd=_IMAGE_COST_PER_IMAGE_USD.get(self._model_id, 0.0),
+            cost_usd=_IMAGE_COST_PER_IMAGE_USD[self._model_id],
             content_type=content_type,
         )
 
