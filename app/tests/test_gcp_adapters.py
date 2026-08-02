@@ -5,8 +5,6 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from google.api_core.exceptions import DeadlineExceeded
-
 from family_media_bot.adapters.image_vertex import VertexImageProvider
 from family_media_bot.adapters.queue_pubsub import PubSubQueue
 from family_media_bot.adapters.storage_gcs import GcsStorage
@@ -38,12 +36,49 @@ class PubSubQueueTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(subscriber_patch.stop)
         self.publisher = publisher_patch.start().return_value
         self.subscriber = subscriber_patch.start().return_value
+        self.streaming_future = MagicMock()
+        self.streaming_future.cancelled.return_value = True
+        self.subscriber.subscribe.return_value = self.streaming_future
         self.queue = PubSubQueue("demo-project", "jobs", "jobs")
 
-    async def test_publish_and_ack_only_after_processing(self) -> None:
+    async def asyncTearDown(self) -> None:
+        await self.queue.close()
+
+    async def _start(self, concurrency: int = 1):
+        await self.queue.start(concurrency)
+        return self.subscriber.subscribe.call_args.kwargs["callback"]
+
+    @staticmethod
+    def _message(data: bytes, ack_id: str = "ack-1", message_id: str = "message-1"):
+        message = MagicMock()
+        message.data = data
+        message.ack_id = ack_id
+        message.message_id = message_id
+        return message
+
+    async def _deliver(self, message: MagicMock) -> None:
+        callback = self.subscriber.subscribe.call_args.kwargs["callback"]
+        await asyncio.to_thread(callback, message)
+        await asyncio.sleep(0)
+
+    async def test_streaming_subscription_starts_exactly_once(self) -> None:
+        await self.queue.start(concurrency=3)
+        await self.queue.start(concurrency=8)
+
+        self.subscriber.subscribe.assert_called_once()
+        kwargs = self.subscriber.subscribe.call_args.kwargs
+        self.assertEqual(
+            self.subscriber.subscribe.call_args.args,
+            ("projects/demo-project/subscriptions/jobs",),
+        )
+        self.assertEqual(kwargs["flow_control"].max_messages, 3)
+        self.assertTrue(kwargs["await_callbacks_on_shutdown"])
+
+    async def test_publish_and_ack_original_message_only_after_processing(self) -> None:
         job = new_job(123, Mode.CUSTOM, "dragon")
         publish_future = MagicMock()
         self.publisher.publish.return_value = publish_future
+        await self._start()
 
         await self.queue.enqueue(job)
 
@@ -53,48 +88,117 @@ class PubSubQueueTests(unittest.IsolatedAsyncioTestCase):
         )
         publish_future.result.assert_called_once()
 
-        received = SimpleNamespace(
-            ack_id="ack-1",
-            message=SimpleNamespace(data=job.model_dump_json().encode("utf-8")),
-        )
-        self.subscriber.pull.return_value = SimpleNamespace(received_messages=[received])
-
+        message = self._message(job.model_dump_json().encode("utf-8"))
+        await self._deliver(message)
         delivery = await self.queue.dequeue()
 
         self.assertIsNotNone(delivery)
         self.assertEqual(delivery.job, job)
-        self.subscriber.acknowledge.assert_not_called()
+        message.ack.assert_not_called()
 
         await self.queue.ack(delivery)
-        self.subscriber.acknowledge.assert_called_once_with(
-            request={
-                "subscription": "projects/demo-project/subscriptions/jobs",
-                "ack_ids": ["ack-1"],
-            }
-        )
+        message.ack.assert_called_once_with()
+        message.nack.assert_not_called()
 
-    async def test_idle_deadline_returns_none(self) -> None:
-        self.subscriber.pull.side_effect = DeadlineExceeded("idle")
-        self.assertIsNone(await self.queue.dequeue(timeout=1.0))
+    async def test_dequeue_timeout_does_not_cancel_or_recreate_stream(self) -> None:
+        await self._start()
 
-    async def test_nack_releases_delivery(self) -> None:
+        self.assertIsNone(await self.queue.dequeue(timeout=0.01))
+        self.assertIsNone(await self.queue.dequeue(timeout=0.01))
+
+        self.subscriber.subscribe.assert_called_once()
+        self.streaming_future.cancel.assert_not_called()
+
+    async def test_nack_releases_original_message(self) -> None:
         job = new_job(123, Mode.CUSTOM, "dragon")
-        received = SimpleNamespace(
+        await self._start()
+        message = self._message(
+            job.model_dump_json().encode("utf-8"),
             ack_id="ack-2",
-            message=SimpleNamespace(data=job.model_dump_json().encode("utf-8")),
+            message_id="message-2",
         )
-        self.subscriber.pull.return_value = SimpleNamespace(received_messages=[received])
+        await self._deliver(message)
         delivery = await self.queue.dequeue()
 
         await self.queue.nack(delivery)
 
-        self.subscriber.modify_ack_deadline.assert_called_once_with(
-            request={
-                "subscription": "projects/demo-project/subscriptions/jobs",
-                "ack_ids": ["ack-2"],
-                "ack_deadline_seconds": 0,
-            }
+        message.nack.assert_called_once_with()
+        message.ack.assert_not_called()
+
+    async def test_invalid_json_and_invalid_jobs_are_nacked(self) -> None:
+        await self._start()
+        invalid_json = self._message(b"{", ack_id="bad-json", message_id="bad-json")
+        invalid_job = self._message(
+            b'{"job_id":"job-1"}',
+            ack_id="bad-job",
+            message_id="bad-job",
         )
+
+        await self._deliver(invalid_json)
+        await self._deliver(invalid_job)
+
+        invalid_json.nack.assert_called_once_with()
+        invalid_job.nack.assert_called_once_with()
+        self.assertIsNone(await self.queue.dequeue(timeout=0.01))
+
+    async def test_concurrency_sets_flow_control_and_bounds_buffer(self) -> None:
+        job_one = new_job(123, Mode.CUSTOM, "dragon")
+        job_two = new_job(456, Mode.RANDOM, "forest")
+        await self._start(concurrency=2)
+        message_one = self._message(
+            job_one.model_dump_json().encode("utf-8"),
+            ack_id="ack-1",
+            message_id="message-1",
+        )
+        message_two = self._message(
+            job_two.model_dump_json().encode("utf-8"),
+            ack_id="ack-2",
+            message_id="message-2",
+        )
+        await self._deliver(message_one)
+        await self._deliver(message_two)
+
+        first, second = await asyncio.gather(
+            self.queue.dequeue(timeout=0.1),
+            self.queue.dequeue(timeout=0.1),
+        )
+
+        self.assertEqual(
+            {first.job.job_id, second.job.job_id},
+            {job_one.job_id, job_two.job_id},
+        )
+        flow_control = self.subscriber.subscribe.call_args.kwargs["flow_control"]
+        self.assertEqual(flow_control.max_messages, 2)
+        await self.queue.ack(first)
+        await self.queue.ack(second)
+
+    async def test_shutdown_cancels_closes_and_releases_buffered_and_inflight(self) -> None:
+        job_one = new_job(123, Mode.CUSTOM, "dragon")
+        job_two = new_job(456, Mode.RANDOM, "forest")
+        await self._start(concurrency=2)
+        message_one = self._message(
+            job_one.model_dump_json().encode("utf-8"),
+            ack_id="ack-1",
+            message_id="message-1",
+        )
+        message_two = self._message(
+            job_two.model_dump_json().encode("utf-8"),
+            ack_id="ack-2",
+            message_id="message-2",
+        )
+        await self._deliver(message_one)
+        await self._deliver(message_two)
+        self.assertIsNotNone(await self.queue.dequeue(timeout=0.1))
+
+        await self.queue.close()
+        await self.queue.close()
+
+        message_one.nack.assert_called_once_with()
+        message_two.nack.assert_called_once_with()
+        self.streaming_future.cancel.assert_called_once_with()
+        self.streaming_future.result.assert_called_once()
+        self.subscriber.close.assert_called_once_with()
+        self.publisher.stop.assert_called_once_with()
 
 
 class GcsStorageTests(unittest.IsolatedAsyncioTestCase):

@@ -44,7 +44,8 @@ class SqsQueue(QueuePort):
                 receipt=msg["ReceiptHandle"],
             )
         except Exception:
-            logger.exception("rejecting malformed SQS message")
+            # Validation errors may embed the rejected body.
+            logger.warning("rejecting malformed SQS message")
             await asyncio.to_thread(
                 self._client.change_message_visibility,
                 QueueUrl=self._queue_url,

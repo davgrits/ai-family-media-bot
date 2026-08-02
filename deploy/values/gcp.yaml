@@ -3,7 +3,7 @@ cloud:
 
 image:
   repository: us-central1-docker.pkg.dev/ai-family-media-bot/ai-family-media-bot/family-media-bot
-  tag: 8cc4af0-20260719-gemini
+  tag: streaming-pubsub-20260719-111322
 
 app:
   adapters:

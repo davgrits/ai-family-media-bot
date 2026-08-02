@@ -25,7 +25,13 @@ JOBS_PROCESSED = Counter(
 
 JOB_DURATION = Histogram(
     "fmb_job_processing_seconds",
-    "End-to-end job processing time in the worker.",
+    "Pipeline processing time in the worker, excluding time waiting in the queue.",
+    ["mode"],
+)
+
+QUEUE_WAIT_DURATION = Histogram(
+    "fmb_queue_wait_seconds",
+    "Time from job creation until delivery to a worker.",
     ["mode"],
 )
 

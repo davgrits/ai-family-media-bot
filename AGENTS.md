@@ -22,9 +22,17 @@
 
 Use four-space Python indentation, type hints, `snake_case` for functions/modules, and `PascalCase` for classes. Ruff targets Python 3.11 with a 100-character line limit. Preserve the port/adapter boundary; business logic must not import cloud SDKs directly. Run `terraform fmt` for Terraform and use two-space YAML indentation. Keep Kubernetes workload logic shared in Helm; isolate only provider identity, adapters, and scalers in values/template branches.
 
+Long-lived queue consumers use the provider-neutral `QueuePort.start(concurrency)` and
+`QueuePort.close()` lifecycle. The worker owns that lifecycle. Streaming callbacks must hand work
+off to asyncio, retain provider delivery handles through processing, and release buffered or
+in-flight deliveries during bounded, idempotent shutdown.
+
 ## Testing Guidelines
 
 Use standard-library `unittest`, including `IsolatedAsyncioTestCase` for async code and mocks for cloud APIs. Name files `test_<concern>.py` and methods `test_<behavior>`. Add regression tests for queue acknowledgement, IAM-sensitive readiness behavior, credential redaction, and provider fallbacks. Run `make test` and `make helm-lint` before submitting.
+
+For streaming queues, also cover one-time subscription startup, concurrency-aligned flow control,
+dequeue timeouts, malformed-message nacks, and shutdown release of buffered/in-flight deliveries.
 
 ## Commit & Pull Request Guidelines
 

@@ -1,6 +1,6 @@
 """Background worker — drains the queue and runs the pipeline per job. Runs as
 N concurrent asyncio tasks inside the process (dev), or as the dedicated worker
-tier in prod (RUN_MODE=worker, sharing SQS with the web tier)."""
+tier in prod."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import logging
 
 from . import metrics
 from .pipeline import Pipeline
-from .ports.queue import QueuePort
+from .ports.queue import QueueDelivery, QueuePort
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +24,13 @@ class Worker:
 
     async def start(self) -> None:
         self._stop.clear()
+        await self._queue.start(self._concurrency)
         self._tasks = [asyncio.create_task(self._run(i)) for i in range(self._concurrency)]
         logger.info("worker started", extra={"concurrency": self._concurrency})
 
     async def _run(self, index: int) -> None:
         while not self._stop.is_set():
+            delivery: QueueDelivery | None = None
             try:
                 delivery = await self._queue.dequeue(timeout=1.0)
                 if delivery is None:
@@ -41,10 +43,24 @@ class Worker:
                     await self._queue.ack(delivery)
                 else:
                     await self._queue.nack(delivery)
+                delivery = None
             except asyncio.CancelledError:
+                if delivery is not None:
+                    await self._release(delivery, index)
                 break
             except Exception:
                 logger.exception("worker loop error", extra={"worker": index})
+                if delivery is not None:
+                    await self._release(delivery, index)
+
+    async def _release(self, delivery: QueueDelivery, index: int) -> None:
+        try:
+            await self._queue.nack(delivery)
+        except Exception:
+            logger.exception(
+                "failed to release delivery",
+                extra={"worker": index, "job_id": delivery.job.job_id},
+            )
 
     async def stop(self) -> None:
         self._stop.set()
@@ -55,4 +71,5 @@ class Worker:
                 await task
             except asyncio.CancelledError:
                 pass
+        await self._queue.close()
         logger.info("worker stopped")

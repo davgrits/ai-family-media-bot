@@ -1,6 +1,7 @@
 """QueuePort — the async work queue between the web tier and the worker tier.
 
-Dev impl: InMemoryQueue. Prod impl: SqsQueue (lands in a later session).
+The optional lifecycle hooks let adapters own long-lived connections without
+leaking provider details into the worker.
 """
 
 from __future__ import annotations
@@ -20,6 +21,12 @@ class QueueDelivery:
 
 
 class QueuePort(abc.ABC):
+    async def start(self, concurrency: int = 1) -> None:
+        """Start any process-scoped consumers, bounded by worker concurrency."""
+
+    async def close(self) -> None:
+        """Stop consumers and release provider resources. Must be idempotent."""
+
     @abc.abstractmethod
     async def enqueue(self, job: Job) -> None:
         """Add a job to the queue. Called from the webhook — must be fast."""

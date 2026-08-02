@@ -37,6 +37,39 @@ class WorkerDeliveryTests(unittest.IsolatedAsyncioTestCase):
         queue.nack.assert_awaited_once_with(delivery)
         queue.ack.assert_not_awaited()
 
+    async def test_unexpected_processing_exception_releases_delivery(self) -> None:
+        job = new_job(123, Mode.CUSTOM, "dragon")
+        delivery = QueueDelivery(job=job, receipt="receipt")
+        queue = AsyncMock()
+        queue.dequeue.side_effect = [delivery, asyncio.CancelledError()]
+        queue.depth.return_value = 0
+        pipeline = AsyncMock()
+        pipeline.process.side_effect = RuntimeError("failed")
+        worker = Worker(queue, pipeline)
+
+        await worker._run(0)
+
+        queue.nack.assert_awaited_once_with(delivery)
+        queue.ack.assert_not_awaited()
+
+    async def test_worker_starts_queue_once_with_configured_concurrency_and_closes(self) -> None:
+        waiting = asyncio.Event()
+
+        async def wait_for_delivery(timeout: float):
+            await waiting.wait()
+
+        queue = AsyncMock()
+        queue.dequeue.side_effect = wait_for_delivery
+        worker = Worker(queue, AsyncMock(), concurrency=3)
+
+        await worker.start()
+        await asyncio.sleep(0)
+        await worker.stop()
+
+        queue.start.assert_awaited_once_with(3)
+        self.assertEqual(queue.dequeue.await_count, 3)
+        queue.close.assert_awaited_once_with()
+
 
 if __name__ == "__main__":
     unittest.main()

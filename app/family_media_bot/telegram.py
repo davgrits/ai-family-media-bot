@@ -52,7 +52,7 @@ class TelegramClient:
         if not self.enabled:
             logger.info(
                 "telegram disabled — would send text",
-                extra={"chat_id": chat_id, "chars": len(text)},
+                extra={"chars": len(text)},
             )
             return
         await self._send_message(chat_id, text)
@@ -70,7 +70,6 @@ class TelegramClient:
             logger.info(
                 "telegram disabled — would send story+image",
                 extra={
-                    "chat_id": chat_id,
                     "story_chars": len(story_text),
                     "image_bytes": len(png_bytes),
                 },

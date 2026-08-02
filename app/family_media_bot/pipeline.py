@@ -46,7 +46,7 @@ class Pipeline:
             try:
                 logger.info(
                     "job started",
-                    extra={"job_id": job.job_id, "mode": mode, "chat_id": job.chat_id},
+                    extra={"job_id": job.job_id, "mode": mode},
                 )
 
                 # 1. Story first (text model).
@@ -74,7 +74,7 @@ class Pipeline:
                 await self._telegram.send_story_and_image(
                     job.chat_id, story.text, image.png_bytes, f"{job.job_id}.png"
                 )
-                logger.info("replied", extra={"job_id": job.job_id, "chat_id": job.chat_id})
+                logger.info("replied", extra={"job_id": job.job_id})
 
                 # 6. Per-job cost = text call + image call.
                 cost = round(story.cost_usd + image.cost_usd, 6)
@@ -94,7 +94,6 @@ class Pipeline:
                         "location": location,
                         "cost_usd": cost,
                         "duration_s": round(duration, 3),
-                        "illustration_prompt": illustration_prompt,
                     },
                 )
                 return True

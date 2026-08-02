@@ -124,6 +124,7 @@ version.
 | **Keyless workload identity** | GCP uses Workload Identity; AWS uses IRSA/OIDC. Neither deployment needs a service-account key or static cloud credential | More IAM plumbing up front |
 | **Warm web, event-scaled worker** | Telegram intake stays responsive while generation workers scale from zero against Pub/Sub or SQS backlog | Replies are asynchronous |
 | **Spot worker capacity** | Generation jobs are retryable and acknowledged only after processing, making them suitable for interruptible nodes | Interrupted work may be retried |
+| **One Pub/Sub stream per worker process** | The GCP adapter uses streaming pull with outstanding messages capped at worker concurrency; callbacks hand off to asyncio and ack/nack only after processing | Streaming removes per-dequeue unary pull churn but does not remove KEDA/Cloud Monitoring cold-start latency |
 | **Provider-native private storage with expiry** | GCS or S3 keeps generated media private and removes reproducible artifacts automatically | Old stories cannot be re-sent indefinitely |
 | **Immutable deployment tags** | Artifact Registry or ECR images remain traceable to a specific rollout | Every release needs a fresh tag |
 | **No real photos of children** | Characters are text descriptions or stylized avatars only | Illustrations are intentionally less personalized |

@@ -81,6 +81,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await app.state.poller.stop()
             if app.state.worker:
                 await app.state.worker.stop()
+            await app.state.queue.close()
             await app.state.telegram.aclose()
 
     app = FastAPI(title="AI Family Media Bot", version="0.1.0", lifespan=lifespan)
@@ -146,7 +147,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         metrics.JOBS_ENQUEUED.labels(mode=parsed.mode.value).inc()
         logger.info(
             "job enqueued",
-            extra={"job_id": job.job_id, "mode": job.mode.value, "chat_id": job.chat_id},
+            extra={"job_id": job.job_id, "mode": job.mode.value},
         )
         return {"ok": True}
 

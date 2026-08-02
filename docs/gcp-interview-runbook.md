@@ -80,6 +80,11 @@ kubectl -n keda logs deployment/keda-operator -f
 
 The expected sequence is Pub/Sub backlog `0 -> 1`, KEDA worker `0 -> 1`, GKE
 Spot worker node `0 -> 1`, generation/reply/ack, and scale-down after cooldown.
+Once the worker process starts, it opens one long-lived Pub/Sub streaming pull.
+Flow control matches `WORKER_CONCURRENCY`, and the original message is acknowledged
+only after the pipeline succeeds or nacked on failure/shutdown. This shortens
+worker-start-to-job-start latency but does not bypass the earlier Cloud
+Monitoring/KEDA activation interval.
 
 ## Deployment commands
 

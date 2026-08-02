@@ -78,8 +78,7 @@ class TelegramPoller:
 
         logger.info(
             "message received",
-            # NB: "args" and "message" are reserved LogRecord attributes.
-            extra={"chat_id": parsed.chat_id, "mode": parsed.mode.value, "request_text": parsed.args[:80]},
+            extra={"mode": parsed.mode.value},
         )
         prompt = compose_prompt(parsed.mode, parsed.args)
         job = new_job(parsed.chat_id, parsed.mode, prompt)
@@ -87,7 +86,7 @@ class TelegramPoller:
         metrics.JOBS_ENQUEUED.labels(mode=parsed.mode.value).inc()
         logger.info(
             "job enqueued",
-            extra={"job_id": job.job_id, "mode": job.mode.value, "chat_id": parsed.chat_id},
+            extra={"job_id": job.job_id, "mode": job.mode.value},
         )
         await self._telegram.send_text(parsed.chat_id, ACK)
 
