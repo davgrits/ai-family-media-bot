@@ -419,6 +419,29 @@ class VertexAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["config"].image_size, "1K")
         self.assertEqual(kwargs["config"].output_mime_type, "image/png")
 
+    @patch("family_media_bot.adapters.image_vertex.genai.Client")
+    async def test_image_failure_raises_instead_of_substituting_a_placeholder(
+        self, client_class
+    ) -> None:
+        client = client_class.return_value
+        client.models.generate_content.side_effect = RuntimeError("quota exceeded")
+        provider = VertexImageProvider(self.settings)
+
+        # Returning a placeholder gradient here made a provider failure ack as
+        # a success: $0 cost, "job completed" logged, a blank rectangle sent to
+        # a child, and no signal anywhere.
+        with self.assertRaises(RuntimeError):
+            await provider.generate("a friendly star")
+
+    @patch("family_media_bot.adapters.image_vertex.genai.Client")
+    async def test_image_response_with_no_image_raises(self, client_class) -> None:
+        client = client_class.return_value
+        client.models.generate_content.return_value = SimpleNamespace(candidates=[])
+        provider = VertexImageProvider(self.settings)
+
+        with self.assertRaisesRegex(RuntimeError, "no generated image"):
+            await provider.generate("a friendly star")
+
 
 if __name__ == "__main__":
     unittest.main()

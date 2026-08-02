@@ -8,16 +8,12 @@ whose Model Garden catalogs expose different publisher models.
 from __future__ import annotations
 
 import asyncio
-import logging
 
 from google import genai
 from google.genai.types import GenerateContentConfig, GenerateImagesConfig
 
 from ..config import Settings
 from ..ports.image import ImageProvider, ImageResult
-from .image_fake import _placeholder_png
-
-logger = logging.getLogger(__name__)
 
 _MAX_PROMPT_CHARS = 2000
 _IMAGE_COST_PER_IMAGE_USD = {
@@ -74,19 +70,18 @@ class VertexImageProvider(ImageProvider):
         return self._invoke_gemini(prompt)
 
     async def generate(self, prompt: str) -> ImageResult:
-        try:
-            image_bytes, content_type = await asyncio.to_thread(self._invoke, prompt)
-            return ImageResult(
-                png_bytes=image_bytes,
-                model_id=self._model_id,
-                cost_usd=_IMAGE_COST_PER_IMAGE_USD.get(self._model_id, 0.0),
-                content_type=content_type,
-            )
-        except Exception:
-            logger.exception("Vertex image generation failed — using placeholder image")
-            return ImageResult(
-                png_bytes=_placeholder_png(), model_id="placeholder-fallback", cost_usd=0.0
-            )
+        # Deliberately no fallback. Substituting a placeholder gradient here
+        # turned every image failure into a job that acked, logged "job
+        # completed", reported $0, and sent a child a blank blue rectangle —
+        # a provider failure disguised as a success. Raise instead, so the
+        # queue retries and the failure is visible.
+        image_bytes, content_type = await asyncio.to_thread(self._invoke, prompt)
+        return ImageResult(
+            png_bytes=image_bytes,
+            model_id=self._model_id,
+            cost_usd=_IMAGE_COST_PER_IMAGE_USD.get(self._model_id, 0.0),
+            content_type=content_type,
+        )
 
     async def check_ready(self) -> bool:
         try:
