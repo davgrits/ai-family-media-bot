@@ -66,6 +66,15 @@ class Settings(BaseSettings):
     vertex_text_model_id: str = "gemini-3.5-flash"
     vertex_image_model_id: str = "gemini-2.5-flash-image"
 
+    # --- Character registry ---
+    # Mounted from a ConfigMap in the cluster; a repo path locally.
+    characters_file: str = ""
+    # Whether an absent registry is fatal. Explicit rather than inferred from
+    # which providers are configured: `make run` and the kind smoke test both
+    # legitimately have no registry mounted, while production must not start
+    # without one and silently tell stories about nobody.
+    characters_required: bool = False
+
     # --- Story shaping ---
     story_max_words: int = 220
 

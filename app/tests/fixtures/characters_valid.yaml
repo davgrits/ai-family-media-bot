@@ -1,0 +1,25 @@
+# Test fixture. Invented characters, not anyone's real family.
+# `nika` shows the legal minimum: names.en only.
+version: 1
+characters:
+  - id: mila
+    appearance: "5-year-old girl, curly red hair in two short braids, freckles, green hooded cloak"
+    traits: "curious, brave, loves animals"
+    names:
+      en: Mila
+      ru: Мила
+      he: מילה
+
+  - id: dad
+    appearance: "tall man in his thirties, short dark beard, round glasses, blue knitted sweater"
+    traits: "warm, patient, tells terrible jokes"
+    names:
+      en: Dad
+      ru: Папа
+      he: אבא
+
+  - id: nika
+    appearance: "small tabby cat, white front paws, one folded ear, red collar with a tiny bell"
+    traits: "sleepy, mischievous, always first to the window"
+    names:
+      en: Nika
