@@ -11,9 +11,7 @@ class LoggingSetupTests(unittest.TestCase):
         root = logging.getLogger()
         original_handlers = list(root.handlers)
         original_root_level = root.level
-        original_levels = {
-            name: logging.getLogger(name).level for name in ("httpx", "httpcore")
-        }
+        original_levels = {name: logging.getLogger(name).level for name in ("httpx", "httpcore")}
         try:
             setup_logging(level="INFO", fmt="json")
 

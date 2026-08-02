@@ -1,8 +1,8 @@
 """The per-job worker flow (contract §Result):
 
-    compose prompt (done at enqueue) → story (text) → derive one-line image
-    prompt from the story → one image → save to storage → send story + image to
-    Telegram → emit per-job cost.
+compose prompt (done at enqueue) → story (text) → derive one-line image
+prompt from the story → one image → save to storage → send story + image to
+Telegram → emit per-job cost.
 """
 
 from __future__ import annotations
@@ -129,7 +129,5 @@ class Pipeline:
                         "Попробуйте ещё раз через минутку.",
                     )
                 except Exception:
-                    logger.exception(
-                        "failed to send error message", extra={"job_id": job.job_id}
-                    )
+                    logger.exception("failed to send error message", extra={"job_id": job.job_id})
                 return False

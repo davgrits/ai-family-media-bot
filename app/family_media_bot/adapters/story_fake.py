@@ -11,8 +11,8 @@ from ..ports.story import StoryProvider, StoryResult
 _CANNED = (
     "Once upon a quiet evening, when the stars were just beginning to blink "
     "awake, a little rabbit named Pip tucked a daisy behind one ear and set off "
-    "to say goodnight to the meadow. \"Goodnight, tall grass,\" Pip whispered, "
-    "and the grass swayed softly back. \"Goodnight, sleepy stream,\" and the "
+    'to say goodnight to the meadow. "Goodnight, tall grass," Pip whispered, '
+    'and the grass swayed softly back. "Goodnight, sleepy stream," and the '
     "water gurgled a gentle reply. The moon rose round and kind, wrapping the "
     "hills in a silver blanket. Pip yawned, curled up in a nest of soft clover, "
     "and listened to the crickets sing a slow, cozy song. One by one, the meadow "

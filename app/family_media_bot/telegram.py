@@ -40,9 +40,7 @@ class TelegramClient:
         if offset is not None:
             params["offset"] = offset
         # Read timeout must exceed the server-side long-poll window.
-        resp = await self._client.get(
-            self._url("getUpdates"), params=params, timeout=timeout + 10
-        )
+        resp = await self._client.get(self._url("getUpdates"), params=params, timeout=timeout + 10)
         resp.raise_for_status()
         data = resp.json()
         return data.get("result", []) if data.get("ok") else []

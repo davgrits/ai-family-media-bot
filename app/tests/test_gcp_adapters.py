@@ -28,9 +28,7 @@ class StoryCommonTests(unittest.TestCase):
 
 class PubSubQueueTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        publisher_patch = patch(
-            "family_media_bot.adapters.queue_pubsub.pubsub_v1.PublisherClient"
-        )
+        publisher_patch = patch("family_media_bot.adapters.queue_pubsub.pubsub_v1.PublisherClient")
         subscriber_patch = patch(
             "family_media_bot.adapters.queue_pubsub.pubsub_v1.SubscriberClient"
         )
@@ -250,9 +248,7 @@ class VertexAdapterTests(unittest.IsolatedAsyncioTestCase):
         )
 
     @patch("family_media_bot.adapters.story_vertex.genai.Client")
-    async def test_story_budget_covers_thinking_and_non_latin_tokens(
-        self, client_class
-    ) -> None:
+    async def test_story_budget_covers_thinking_and_non_latin_tokens(self, client_class) -> None:
         client = client_class.return_value
         client.models.generate_content.return_value = SimpleNamespace(
             text="Жила-была звезда.",
@@ -299,17 +295,13 @@ class VertexAdapterTests(unittest.IsolatedAsyncioTestCase):
                 client.models.generate_content.return_value = SimpleNamespace(
                     text="Жила-была звезда, и вдруг",
                     candidates=[SimpleNamespace(finish_reason=reason)],
-                    usage_metadata=SimpleNamespace(
-                        prompt_token_count=12, candidates_token_count=6
-                    ),
+                    usage_metadata=SimpleNamespace(prompt_token_count=12, candidates_token_count=6),
                 )
                 with self.assertRaises(RuntimeError):
                     await provider.generate(Mode.FAIRYTALE, "prompt")
 
     @patch("family_media_bot.adapters.story_vertex.genai.Client")
-    async def test_all_budget_spent_on_thinking_reports_the_real_cause(
-        self, client_class
-    ) -> None:
+    async def test_all_budget_spent_on_thinking_reports_the_real_cause(self, client_class) -> None:
         client = client_class.return_value
         # The canonical failure: thinking consumed the whole budget and no
         # story was emitted. Checking emptiness first would misreport this as
@@ -350,9 +342,7 @@ class VertexAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.cost_usd, 0.001224)
 
     @patch("family_media_bot.adapters.image_vertex.genai.Client")
-    async def test_gemini_image_generation_uses_production_defaults(
-        self, client_class
-    ) -> None:
+    async def test_gemini_image_generation_uses_production_defaults(self, client_class) -> None:
         client = client_class.return_value
         client.models.generate_content.return_value = SimpleNamespace(
             candidates=[
@@ -392,9 +382,7 @@ class VertexAdapterTests(unittest.IsolatedAsyncioTestCase):
         client = client_class.return_value
         client.models.generate_images.return_value = SimpleNamespace(
             generated_images=[
-                SimpleNamespace(
-                    image=SimpleNamespace(image_bytes=b"png", mime_type="image/png")
-                )
+                SimpleNamespace(image=SimpleNamespace(image_bytes=b"png", mime_type="image/png"))
             ]
         )
         settings = Settings(
@@ -453,9 +441,7 @@ class VertexAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     @patch("family_media_bot.adapters.image_vertex.genai.Client")
     def test_unpriced_image_model_fails_at_construction(self, _client_class) -> None:
-        settings = Settings(
-            gcp_project_id="demo-project", vertex_image_model_id="imagen-9-ultra"
-        )
+        settings = Settings(gcp_project_id="demo-project", vertex_image_model_id="imagen-9-ultra")
 
         with self.assertRaisesRegex(ValueError, "no price entry for image model"):
             VertexImageProvider(settings)

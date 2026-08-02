@@ -37,9 +37,12 @@ lint:
 	cd $(APP_DIR) && ./.venv/bin/ruff check .
 	cd $(APP_DIR) && ./.venv/bin/ruff format --check .
 
+# Format first: ruff format resolves some long lines that `check --fix` cannot,
+# and `check` exits non-zero on anything left for a human, which must not stop
+# the formatter from having run.
 fmt:
-	cd $(APP_DIR) && ./.venv/bin/ruff check --fix .
 	cd $(APP_DIR) && ./.venv/bin/ruff format .
+	cd $(APP_DIR) && ./.venv/bin/ruff check --fix .
 
 # --strict turns chart warnings into failures; image.tag is normally supplied by
 # CI, so a placeholder is passed here to satisfy the schema.

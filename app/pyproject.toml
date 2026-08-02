@@ -31,3 +31,12 @@ include = ["family_media_bot*"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint]
+# Ruff's default selection is E4, E7, E9, F — which omits E501, so the
+# line-length above was decorative until this list existed. E/W give the full
+# pycodestyle set, F is pyflakes, I is import ordering.
+#
+# B and UP are deliberately not selected: B027 flags QueuePort.start/close, which
+# are intentionally empty optional lifecycle hooks rather than abstract methods.
+select = ["E", "W", "F", "I"]

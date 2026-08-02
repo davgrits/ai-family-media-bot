@@ -46,7 +46,10 @@ def setup_telemetry(service_name: str = "family-media-bot", otlp_endpoint: str =
         trace.set_tracer_provider(provider)
         _initialized = True
     except Exception as exc:  # SDK not installed, etc.
-        logger.warning("otel sdk unavailable; continuing without tracing", extra={"error": str(exc)})
+        logger.warning(
+            "otel sdk unavailable; continuing without tracing",
+            extra={"error": str(exc)},
+        )
 
 
 def get_tracer(name: str = "family_media_bot"):

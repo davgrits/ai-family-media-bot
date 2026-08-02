@@ -43,9 +43,7 @@ class WorkerDeliveryTests(unittest.IsolatedAsyncioTestCase):
         for attempt in (1, 2, 3, 4):
             with self.subTest(attempt=attempt):
                 _, pipeline, delivery = await self._run_one_delivery(False, attempt=attempt)
-                pipeline.process.assert_awaited_once_with(
-                    delivery.job, notify_on_failure=False
-                )
+                pipeline.process.assert_awaited_once_with(delivery.job, notify_on_failure=False)
 
     async def test_chat_is_notified_on_the_final_attempt(self) -> None:
         _, pipeline, delivery = await self._run_one_delivery(False, attempt=5)
