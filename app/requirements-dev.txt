@@ -1,0 +1,4 @@
+# Development-only dependencies. The container image installs requirements.txt
+# alone, so nothing here may be imported by application code.
+-r requirements.txt
+ruff==0.14.2

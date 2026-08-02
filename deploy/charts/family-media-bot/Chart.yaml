@@ -1,6 +1,8 @@
 apiVersion: v2
 name: family-media-bot
-description: Multi-cloud Kubernetes deployment for the AI family media bot
+description: GKE deployment for the AI family media bot
 type: application
-version: 0.2.0
+# 0.3.0 is a breaking values change: the provider selector, the autoscaler
+# replica envelope, nodeSelectors, and tolerations are all gone.
+version: 0.3.0
 appVersion: "0.1.0"

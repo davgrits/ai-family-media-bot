@@ -1,7 +1,7 @@
 """FastAPI application: the web tier and (in RUN_MODE=all/worker) the in-process
 worker. Endpoints follow the frozen contract:
 
-    GET  /healthz   liveness — MUST NOT touch Bedrock/SQS/S3
+    GET  /healthz   liveness — MUST NOT touch Pub/Sub, GCS, or Vertex AI
     GET  /readyz    readiness — checks the swap-point deps
     GET  /metrics   Prometheus scrape
     POST /webhook   Telegram update → validate → enqueue → 200 fast
@@ -93,7 +93,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/healthz")
     async def healthz():
-        # Liveness only. MUST NOT check Bedrock/SQS/S3 (avoids restart loops).
+        # Liveness only. MUST NOT check cloud dependencies (avoids restart loops).
         return {"status": "ok"}
 
     @app.get("/metrics")

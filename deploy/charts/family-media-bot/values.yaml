@@ -1,12 +1,9 @@
-# Portable workload defaults. Select a provider with deploy/values/aws.yaml or
-# deploy/values/gcp.yaml; the active provider's required values are validated.
-cloud:
-  provider: gcp
-
+# Workload defaults. Deployment inputs live in deploy/values/prod.yaml.
 image:
-  # Full image repository without a tag. Artifact Registry and ECR repository
-  # outputs have different path shapes, so templates must not append a name.
+  # Full Artifact Registry repository path, without a tag.
   repository: ""
+  # Deliberately empty: CI supplies the tag at upgrade time so a release is
+  # always traceable to a commit. A committed tag drifts from what is deployed.
   tag: ""
   pullPolicy: IfNotPresent
 
@@ -27,8 +24,6 @@ serviceAccount:
 
 web:
   replicaCount: 1
-  nodeSelector:
-    role: web
   resources:
     requests:
       cpu: 50m
@@ -37,18 +32,12 @@ web:
       memory: 512Mi
 
 worker:
-  # KEDA owns the replica count. This is only the capacity envelope.
-  minReplicaCount: 0
-  maxReplicaCount: 10
-  pollingInterval: 15
-  cooldownPeriod: 300
-  nodeSelector:
-    role: worker
-  tolerations:
-    - key: workload
-      operator: Equal
-      value: jobs
-      effect: NoSchedule
+  # One warm worker, deliberately. Scaling from zero on Pub/Sub backlog measured
+  # ~4m43s of activation latency: the backlog metric samples on a ~60s interval
+  # and can gap for minutes. For a bot a child is waiting on, that delay is the
+  # whole user experience. Scale-to-zero belongs on a workload with real idle
+  # periods and nobody waiting for the first request.
+  replicaCount: 1
   resources:
     requests:
       cpu: 250m

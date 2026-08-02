@@ -262,8 +262,10 @@ class PubSubQueue(QueuePort):
             )
 
     async def depth(self) -> int:
-        # Pub/Sub exposes backlog size through Cloud Monitoring rather than the
-        # Subscriber API. KEDA reads that authoritative metric for scaling.
+        # Pub/Sub exposes backlog size through Cloud Monitoring, not the
+        # Subscriber API, so there is nothing cheap to return here. Reporting 0
+        # is a lie the QUEUE_DEPTH gauge then publishes; both are slated for
+        # removal in favour of the oldest_unacked_message_age alert.
         return 0
 
     async def check_ready(self) -> bool:

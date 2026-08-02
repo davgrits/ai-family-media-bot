@@ -1,6 +1,6 @@
 """ImageProvider — generates the single illustration for a story.
 
-Dev impl: FakeImageProvider. Prod impl: BedrockImageProvider (image model).
+Dev impl: FakeImageProvider. Prod impl: VertexImageProvider (image model).
 """
 
 from __future__ import annotations

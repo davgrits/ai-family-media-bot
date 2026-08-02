@@ -7,11 +7,10 @@ prometheus-client>=0.20,<1.0
 httpx>=0.27,<1.0
 opentelemetry-sdk>=1.24,<2.0
 opentelemetry-exporter-otlp-proto-http>=1.24,<2.0
-# AWS SDK — Bedrock (story + image), SQS, S3 adapters.
-boto3>=1.34,<2.0
-# CRT extra: required by the `aws login` credential provider on dev machines.
-botocore[crt]>=1.34,<2.0
 # GCP SDKs — Pub/Sub queue, GCS media storage, and Vertex AI via the Gen AI SDK.
 google-cloud-pubsub>=2.21,<3.0
 google-cloud-storage>=2.16,<4.0
 google-genai>=1.0,<2.0
+# The character registry is YAML. Declared explicitly: it was previously only
+# present transitively via uvicorn[standard], which the image does not install.
+pyyaml>=6.0,<7.0

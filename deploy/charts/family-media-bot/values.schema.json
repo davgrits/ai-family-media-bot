@@ -1,31 +1,24 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "family-media-bot values",
+  "description": "Validated at install/upgrade time. The point of this schema is to turn a misconfigured release into a helm error rather than a CrashLoopBackOff.",
   "type": "object",
-  "required": ["cloud", "image", "app", "serviceAccount", "web", "worker"],
-  "additionalProperties": true,
+  "required": ["image", "app", "serviceAccount", "gcp", "web", "worker"],
+  "additionalProperties": false,
   "properties": {
-    "cloud": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["provider"],
-      "properties": {
-        "provider": {
-          "type": "string",
-          "enum": ["aws", "gcp"]
-        }
-      }
-    },
     "image": {
       "type": "object",
-      "required": ["repository", "tag"],
+      "required": ["repository"],
+      "additionalProperties": false,
       "properties": {
         "repository": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Full Artifact Registry path, without a tag."
         },
         "tag": {
           "type": "string",
-          "minLength": 1
+          "description": "Supplied by CI at upgrade time, not committed. Empty in values.yaml on purpose."
         },
         "pullPolicy": {
           "type": "string",
@@ -35,266 +28,99 @@
     },
     "app": {
       "type": "object",
-      "required": [
-        "telegramSecretName",
-        "workerConcurrency",
-        "logLevel",
-        "logFormat",
-        "adapters"
-      ],
+      "required": ["name", "telegramSecretName", "adapters"],
+      "additionalProperties": false,
       "properties": {
+        "name": { "type": "string", "minLength": 1 },
         "telegramSecretName": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Kubernetes Secret holding TELEGRAM_BOT_TOKEN. The token itself is never a value in this chart."
         },
-        "workerConcurrency": {
-          "type": "integer",
-          "minimum": 1
+        "workerConcurrency": { "type": "integer", "minimum": 1 },
+        "logLevel": {
+          "type": "string",
+          "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
         },
+        "logFormat": { "type": "string", "enum": ["json", "console"] },
         "adapters": {
           "type": "object",
           "required": ["queue", "storage", "story", "image"],
+          "additionalProperties": false,
+          "description": "Mirrors the Literal types in app/family_media_bot/config.py. A value the app would reject at startup is rejected here instead.",
           "properties": {
-            "queue": {
-              "type": "string",
-              "enum": ["sqs", "pubsub"]
-            },
-            "storage": {
-              "type": "string",
-              "enum": ["s3", "gcs"]
-            },
-            "story": {
-              "type": "string",
-              "enum": ["bedrock", "vertex"]
-            },
-            "image": {
-              "type": "string",
-              "enum": ["bedrock", "vertex"]
-            }
+            "queue": { "type": "string", "enum": ["inmemory", "pubsub"] },
+            "storage": { "type": "string", "enum": ["local", "gcs"] },
+            "story": { "type": "string", "enum": ["fake", "vertex"] },
+            "image": { "type": "string", "enum": ["fake", "vertex"] }
           }
         }
       }
     },
     "serviceAccount": {
       "type": "object",
-      "required": ["annotations"],
+      "additionalProperties": false,
       "properties": {
         "annotations": {
           "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
+          "description": "Carries iam.gke.io/gcp-service-account for Workload Identity.",
+          "additionalProperties": { "type": "string" }
         }
       }
     },
     "gcp": {
       "type": "object",
+      "required": [
+        "projectId",
+        "region",
+        "mediaBucket",
+        "jobsTopic",
+        "jobsSubscription",
+        "vertexTextModel",
+        "vertexImageModel"
+      ],
+      "additionalProperties": false,
       "properties": {
-        "projectId": {
-          "type": "string",
-          "minLength": 1
-        },
-        "region": {
-          "type": "string",
-          "minLength": 1
-        },
-        "mediaBucket": {
-          "type": "string",
-          "minLength": 1
-        },
-        "jobsTopic": {
-          "type": "string",
-          "minLength": 1
-        },
-        "jobsSubscription": {
-          "type": "string",
-          "minLength": 1
-        },
-        "vertexTextLocation": {
-          "type": "string",
-          "minLength": 1
-        },
-        "vertexImageLocation": {
-          "type": "string",
-          "minLength": 1
-        },
+        "projectId": { "type": "string", "minLength": 1 },
+        "region": { "type": "string", "minLength": 1 },
+        "mediaBucket": { "type": "string", "minLength": 1 },
+        "jobsTopic": { "type": "string", "minLength": 1 },
+        "jobsSubscription": { "type": "string", "minLength": 1 },
+        "vertexTextLocation": { "type": "string", "minLength": 1 },
+        "vertexImageLocation": { "type": "string", "minLength": 1 },
         "vertexTextModel": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Must have a price entry in story_vertex.py, or the adapter refuses to start rather than reporting $0 per job."
         },
         "vertexImageModel": {
           "type": "string",
-          "minLength": 1
-        }
-      }
-    },
-    "aws": {
-      "type": "object",
-      "properties": {
-        "region": {
-          "type": "string",
-          "minLength": 1
-        },
-        "queueUrl": {
-          "type": "string",
-          "pattern": "^https://sqs\\.[^/]+\\.amazonaws\\.com/"
-        },
-        "mediaBucket": {
-          "type": "string",
-          "minLength": 1
-        },
-        "bedrockTextModel": {
-          "type": "string",
-          "minLength": 1
-        },
-        "bedrockImageModel": {
-          "type": "string",
-          "minLength": 1
-        },
-        "bedrockImageRegion": {
-          "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Must have a price entry in image_vertex.py, for the same reason."
         }
       }
     },
     "web": {
       "type": "object",
-      "required": ["replicaCount", "nodeSelector", "resources"],
+      "required": ["replicaCount"],
+      "additionalProperties": false,
       "properties": {
-        "replicaCount": {
-          "type": "integer",
-          "minimum": 1
-        }
+        "replicaCount": { "type": "integer", "minimum": 1 },
+        "resources": { "type": "object" }
       }
     },
     "worker": {
       "type": "object",
-      "required": [
-        "minReplicaCount",
-        "maxReplicaCount",
-        "pollingInterval",
-        "cooldownPeriod",
-        "nodeSelector",
-        "tolerations",
-        "resources"
-      ],
+      "required": ["replicaCount"],
+      "additionalProperties": false,
       "properties": {
-        "minReplicaCount": {
+        "replicaCount": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 1,
+          "description": "Minimum 1 on purpose: activating from zero on Pub/Sub backlog measured ~4m43s, because the backlog metric samples on a ~60s interval."
         },
-        "maxReplicaCount": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "pollingInterval": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "cooldownPeriod": {
-          "type": "integer",
-          "minimum": 0
-        }
+        "resources": { "type": "object" }
       }
     }
-  },
-  "allOf": [
-    {
-      "if": {
-        "properties": {
-          "cloud": {
-            "properties": {
-              "provider": {
-                "const": "gcp"
-              }
-            }
-          }
-        }
-      },
-      "then": {
-        "required": ["gcp"],
-        "properties": {
-          "app": {
-            "properties": {
-              "adapters": {
-                "properties": {
-                  "queue": { "const": "pubsub" },
-                  "storage": { "const": "gcs" },
-                  "story": { "const": "vertex" },
-                  "image": { "const": "vertex" }
-                }
-              }
-            }
-          },
-          "serviceAccount": {
-            "properties": {
-              "annotations": {
-                "required": ["iam.gke.io/gcp-service-account"]
-              }
-            }
-          },
-          "gcp": {
-            "required": [
-              "projectId",
-              "region",
-              "mediaBucket",
-              "jobsTopic",
-              "jobsSubscription",
-              "vertexTextLocation",
-              "vertexImageLocation",
-              "vertexTextModel",
-              "vertexImageModel"
-            ]
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "cloud": {
-            "properties": {
-              "provider": {
-                "const": "aws"
-              }
-            }
-          }
-        }
-      },
-      "then": {
-        "required": ["aws"],
-        "properties": {
-          "app": {
-            "properties": {
-              "adapters": {
-                "properties": {
-                  "queue": { "const": "sqs" },
-                  "storage": { "const": "s3" },
-                  "story": { "const": "bedrock" },
-                  "image": { "const": "bedrock" }
-                }
-              }
-            }
-          },
-          "serviceAccount": {
-            "properties": {
-              "annotations": {
-                "required": ["eks.amazonaws.com/role-arn"]
-              }
-            }
-          },
-          "aws": {
-            "required": [
-              "region",
-              "queueUrl",
-              "mediaBucket",
-              "bedrockTextModel",
-              "bedrockImageModel",
-              "bedrockImageRegion"
-            ]
-          }
-        }
-      }
-    }
-  ]
+  }
 }

@@ -1,8 +1,0 @@
-# Legacy AWS manifest retained for history. Helm is the canonical deployment.
-# All app workloads live in one namespace. The name is load-bearing: the IRSA
-# trust policy (infra/aws/irsa.tf) only allows tokens for
-# system:serviceaccount:app:family-media-bot — rename this and AWS auth breaks.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: app

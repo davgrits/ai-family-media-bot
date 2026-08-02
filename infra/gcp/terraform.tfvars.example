@@ -3,8 +3,8 @@ project_id       = "your-gcp-project-id"
 region           = "us-central1"
 cluster_location = "us-central1-a"
 
-# One e2-medium has enough allocatable capacity for GKE system pods, KEDA, and
-# the always-on bot. The worker pool remains Spot and scales from zero.
+# One e2-medium has enough allocatable capacity for GKE system pods and the
+# always-on web tier. The worker pool is separate and interruptible.
 web_machine_type = "e2-medium"
 web_max_nodes    = 1
 

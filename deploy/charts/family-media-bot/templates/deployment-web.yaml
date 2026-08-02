@@ -23,8 +23,6 @@ spec:
         app.kubernetes.io/component: web
     spec:
       serviceAccountName: {{ include "family-media-bot.name" . }}
-      nodeSelector:
-        {{- toYaml .Values.web.nodeSelector | nindent 8 }}
       containers:
         - name: web
           image: "{{ required "image.repository is required" .Values.image.repository }}:{{ required "image.tag is required" .Values.image.tag }}"

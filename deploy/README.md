@@ -1,21 +1,20 @@
-# Kubernetes deployments
+# Kubernetes deployment
 
-Helm is the canonical application deployment for both clouds:
+Helm is the only deployment path.
 
 ```text
-charts/family-media-bot/  shared web, worker, identity, config, and KEDA objects
-values/aws.yaml           EKS/IRSA + SQS/S3/Bedrock configuration
-values/gcp.yaml           GKE Workload Identity + Pub/Sub/GCS/Vertex configuration
-addons/aws/               AWS KEDA and cluster-autoscaler Helm values
-addons/gcp/               GCP KEDA Helm values
-examples/                 provider-neutral secret examples
-legacy/kustomize/aws/     historical manifests; do not use for new deployments
+charts/family-media-bot/  web, worker, identity, config
+values/prod.yaml          the live GCP environment's inputs
+examples/                 how to create the Telegram secret (never a committed value)
 ```
 
-The chart shares everything Kubernetes-native and branches only where the cloud
-API differs: workload identity annotations, environment configuration, and the
-KEDA scaler. Terraform owns cloud resources; Helm consumes their identifiers.
+Terraform owns the cloud resources; Helm consumes their identifiers. Everything
+in `values/prod.yaml` comes from `terraform -chdir=infra/gcp output`.
 
-Validate both deployment paths with `make helm-lint`. See the
+The image tag is deliberately **not** in `values/prod.yaml`. CI supplies it at
+upgrade time (`--set image.tag=$GITHUB_SHA`), so a release is always traceable to
+a commit and a committed tag cannot drift from what is actually running.
+
+Validate with `make helm-lint`. See the
 [chart guide](charts/family-media-bot/README.md) for install and verification
 commands.

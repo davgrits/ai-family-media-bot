@@ -1,4 +1,7 @@
-"""Helpers shared by the Bedrock and Vertex story adapters."""
+"""Parsing for the story model's output contract.
+
+Kept apart from the adapter so the format can be tested without a model call.
+"""
 
 _ILLUSTRATION_MARKER = "ILLUSTRATION:"
 

@@ -1,7 +1,7 @@
 """InMemoryQueue — dev implementation of QueuePort backed by asyncio.Queue.
 
 Lives inside a single process, so the web tier and worker tier must run together
-(RUN_MODE=all) when using it. SqsQueue replaces it for the cross-process split.
+(RUN_MODE=all) when using it. PubSubQueue replaces it for the cross-process split.
 """
 
 from __future__ import annotations

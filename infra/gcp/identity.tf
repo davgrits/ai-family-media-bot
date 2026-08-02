@@ -1,5 +1,7 @@
-# Separate Google service accounts mirror AWS IRSA: app pods get only their
-# runtime data-plane permissions; KEDA gets read-only subscription visibility.
+# Two identities, split by blast radius. Nodes get only what every node needs
+# (pull images, ship logs and metrics); the app gets only its runtime data plane,
+# scoped to one bucket, one topic, and one subscription. Neither has a key file —
+# pods obtain credentials through Workload Identity.
 resource "google_service_account" "nodes" {
   account_id   = "family-media-gke-node"
   display_name = "GKE nodes for ${var.project_name}"
@@ -8,11 +10,6 @@ resource "google_service_account" "nodes" {
 resource "google_service_account" "app" {
   account_id   = "family-media-app"
   display_name = "Application workload identity for ${var.project_name}"
-}
-
-resource "google_service_account" "keda" {
-  account_id   = "family-media-keda"
-  display_name = "KEDA workload identity for ${var.project_name}"
 }
 
 resource "google_project_iam_member" "nodes_artifact_reader" {
@@ -59,24 +56,10 @@ resource "google_pubsub_subscription_iam_member" "app_view" {
   member       = "serviceAccount:${google_service_account.app.email}"
 }
 
-resource "google_pubsub_subscription_iam_member" "keda_view" {
-  subscription = google_pubsub_subscription.jobs.name
-  role         = "roles/pubsub.viewer"
-  member       = "serviceAccount:${google_service_account.keda.email}"
-}
-
 # Vertex model invocations are deliberately granted only after the GCP-native
 # adapters and their explicit model IDs were added to the application.
 resource "google_project_iam_member" "app_vertex_user" {
   project = var.project_id
   role    = "roles/aiplatform.user"
   member  = "serviceAccount:${google_service_account.app.email}"
-}
-
-# The KEDA Pub/Sub scaler reads Cloud Monitoring subscription metrics. It does
-# not receive, acknowledge, publish, or otherwise mutate application messages.
-resource "google_project_iam_member" "keda_monitoring_viewer" {
-  project = var.project_id
-  role    = "roles/monitoring.viewer"
-  member  = "serviceAccount:${google_service_account.keda.email}"
 }

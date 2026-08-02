@@ -45,7 +45,7 @@ variable "services_cidr" {
 }
 
 variable "web_machine_type" {
-  description = "Always-on web-pool machine type. e2-medium fits GKE system services, KEDA, and the web pod on one node."
+  description = "Always-on web-pool machine type. e2-medium fits GKE system services and the web pod on one node."
   type        = string
   default     = "e2-medium"
 }

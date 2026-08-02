@@ -1,7 +1,8 @@
 locals {
+  # Kept as a map rather than flattened to a single resource: it still reads
+  # clearly and leaves room for a second identity without restructuring.
   workload_identities = {
-    app  = { namespace = "app", service_account = "family-media-bot", gsa = google_service_account.app.email }
-    keda = { namespace = "keda", service_account = "keda-operator", gsa = google_service_account.keda.email }
+    app = { namespace = "app", service_account = "family-media-bot", gsa = google_service_account.app.email }
   }
 }
 

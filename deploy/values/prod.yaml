@@ -1,16 +1,11 @@
-cloud:
-  provider: gcp
-
+# Deployment inputs for the live GCP environment.
+# Values come from `terraform -chdir=infra/gcp output`.
+#
+# image.tag is deliberately absent: CI supplies it at upgrade time with
+#   --set image.tag=$GITHUB_SHA
+# A committed tag drifts from what is actually running.
 image:
   repository: us-central1-docker.pkg.dev/ai-family-media-bot/ai-family-media-bot/family-media-bot
-  tag: streaming-pubsub-20260719-111322
-
-app:
-  adapters:
-    queue: pubsub
-    storage: gcs
-    story: vertex
-    image: vertex
 
 serviceAccount:
   annotations:

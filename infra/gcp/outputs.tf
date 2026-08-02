@@ -29,7 +29,7 @@ output "jobs_topic_name" {
 }
 
 output "jobs_subscription_name" {
-  description = "Pub/Sub subscription consumed by workers and observed by KEDA."
+  description = "Pub/Sub subscription consumed by workers."
   value       = google_pubsub_subscription.jobs.name
 }
 
@@ -41,9 +41,4 @@ output "media_bucket_name" {
 output "app_google_service_account_email" {
   description = "GSA to annotate on app/family-media-bot for Workload Identity."
   value       = google_service_account.app.email
-}
-
-output "keda_google_service_account_email" {
-  description = "GSA to annotate on keda/keda-operator for Workload Identity."
-  value       = google_service_account.keda.email
 }

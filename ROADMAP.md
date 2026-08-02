@@ -2,8 +2,10 @@
 
 Status legend: [x] done, [ ] pending
 
-> Current runtime: GCP only. AWS and GCP infrastructure are defined in separate
-> Terraform roots, and one shared Helm chart renders either deployment.
+> Runtime: GCP only. One Terraform root, one Helm chart. AWS support was built,
+> measured, and deliberately removed — a second cloud that is never deployed
+> doubles the reading cost of the repo without proving anything the port and
+> adapter interfaces do not already prove.
 
 ## 0. Core application
 
@@ -14,89 +16,87 @@ Status legend: [x] done, [ ] pending
 - [x] Telegram polling and webhook intake
 - [x] Ack after successful processing; nack/retry on failure
 - [x] Python 3.11 package, unit tests, and container image
+- [x] Adapters raise on provider failure instead of fabricating a success
+- [ ] Character registry in git, injected verbatim into story and image prompts
+- [ ] `/family list`
+- [ ] Story language selection (en/ru/he)
 
-## 1. Multi-cloud runtime adapters
+## 1. GCP runtime adapters
 
-- [x] AWS: SQS, S3, and Bedrock adapters
-- [x] GCP: Pub/Sub, GCS, and Vertex AI adapters
-- [x] Provider selection through environment-driven factories
-- [x] Shared story/image pipeline with no cloud SDK imports in business logic
-- [x] Current models: `gemini-3.5-flash` and `gemini-2.5-flash-image`
+- [x] Pub/Sub, GCS, and Vertex AI adapters
+- [x] Adapter selection through environment-driven factories, validated at startup
+- [x] Story/image pipeline with no cloud SDK imports in business logic
+- [x] Streaming pull with flow control capped at worker concurrency
+- [x] Models: `gemini-3.5-flash` and `gemini-2.5-flash-image`
+- [x] Per-job cost includes reasoning tokens, which are billed but excluded from
+      the visible output count
+- [ ] Upper time bound on every model call
 
 ## 2. Infrastructure (Terraform)
 
-### GCP — deployed
-
 - [x] VPC, Cloud NAT, and private-node GKE
-- [x] Separate on-demand web and Spot worker node pools
 - [x] Pub/Sub jobs topic, subscription, and dead-letter queue
 - [x] Private GCS media bucket with lifecycle cleanup
 - [x] Artifact Registry
-- [x] Workload Identity for the application and KEDA
+- [x] Workload Identity for the application
 - [x] Applied and validated in project `ai-family-media-bot`
+- [ ] Consolidate to one node pool (the two-pool split existed for scale-to-zero)
+- [ ] Workload Identity Federation for CI, so no key file is ever issued
 
-### AWS — defined, not currently deployed
+## 3. Kubernetes deployment (Helm)
 
-- [x] Independent Terraform root and state configuration
-- [x] VPC, private EKS nodes, NAT, and selected VPC endpoints
-- [x] SQS jobs queue and dead-letter queue
-- [x] Private S3 media bucket with lifecycle cleanup
-- [x] ECR and IRSA roles for the application and cluster add-ons
-- [x] Terraform formatting and validation
-- [ ] Apply or restore the AWS environment when an AWS runtime is required
+- [x] One schema-validated chart
+- [x] Web and worker Deployments
+- [x] Image tag supplied at upgrade time, never committed
+- [x] Chart lints and renders
+- [ ] Service template and a `helm test` hook against `/healthz`
+- [ ] `checksum/characters` annotation so a ConfigMap-only change reaches the pods
 
-## 3. Shared Kubernetes deployment (Helm)
-
-- [x] One schema-validated chart for both AWS and GCP
-- [x] Shared web and worker Deployments
-- [x] Provider-specific values for adapters, identity, and cloud resources
-- [x] Provider-specific KEDA scaler branches
-- [x] GCP KEDA installation and application release
-- [x] GCP worker and Spot node pool scale to zero while idle
-- [x] AWS and GCP releases lint and render successfully
-- [ ] Deploy the shared chart to AWS and verify SQS-driven scale-up
-
-## 4. GCP production verification
+## 4. Production verification
 
 - [x] GKE web pod healthy and ready
 - [x] Pub/Sub, GCS, Vertex AI, and Workload Identity readiness checks
 - [x] Live Gemini story and image generation from the running pod
 - [x] Telegram Bot API connectivity and polling startup
-- [x] KEDA ScaledObject healthy with an idle worker count of zero
+- [x] Cold-start latency measured: 4m43s activation, which is what removed
+      scale-to-zero
 - [ ] Capture a clean Telegram message → Pub/Sub → worker → reply demonstration
-- [ ] Capture KEDA and GKE worker scale-up/scale-down evidence
+- [ ] Verify character consistency across two illustrations of the same cast
 
 ## 5. CI/CD (GitHub Actions)
 
-- [ ] Run unit tests, Helm validation, and Terraform checks on pull requests
+- [ ] Run unit tests, ruff, Helm validation, and Terraform checks on pull requests
 - [ ] Build an AMD64 or multi-architecture container image
-- [ ] Push to Artifact Registry for GCP and ECR for AWS using OIDC
-- [ ] Promote immutable image tags through provider-specific Helm values
+- [ ] Push to Artifact Registry using Workload Identity Federation, keyless
+- [ ] Promote immutable image tags through `--set image.tag`
 - [ ] Add protected deployment environments and required checks
 
 ## 6. Observability
 
-- [x] Structured JSON application logs
-- [x] Prometheus health, job, duration, and cost metrics
+- [x] Structured JSON application logs with no personal data
+- [x] Prometheus health, job, duration, queue-wait, and cost metrics
 - [x] OpenTelemetry spans with no-op behavior when no exporter is configured
-- [x] KEDA scaling from Google Cloud Monitoring's Prometheus endpoint
-- [ ] Add operational dashboards
-- [ ] Alert on dead-letter messages, crash loops, and sustained queue backlog
-- [ ] Define provider-specific log and metric retention
+- [ ] **Collect the metrics that are already emitted** — nothing scrapes
+      `/metrics` today, so `fmb_queue_wait_seconds` measured the cold start from
+      day one and no one could see it
+- [ ] Alert on sustained queue backlog (`oldest_unacked_message_age`)
+- [ ] Detect a permanently dead Pub/Sub stream: the pod stays Ready while
+      consuming nothing
+- [ ] Alert on dead-letter messages and crash loops
 
 ## 7. Portfolio and operations
 
-- [x] README reflects the shared chart and GCP-only live deployment
-- [x] Architecture diagram distinguishes live GCP from the AWS target
-- [x] GCP operating and interview runbook
-- [ ] Add screenshots of the Telegram result and scaling sequence
+- [x] README reflects the GCP-only deployment
+- [x] Architecture diagram matches what is actually running
+- [x] Operating runbook
+- [ ] Add screenshots of the Telegram result
 - [ ] Publish a current GCP cost breakdown and budget guardrails
-- [ ] Add GCP teardown and restoration instructions
-- [ ] Add an AWS re-deployment runbook
+- [ ] Add teardown and restoration instructions
 
 ## Working notes
 
-- The live fixed-cost floor is the GKE control plane, Cloud NAT, and warm web
-  node; model generation and Spot workers are usage-driven.
-- AWS is source-controlled and render-tested, but it has no current runtime
-  cost because it is not deployed.
+- The fixed-cost floor is the GKE control plane (free for one zonal cluster),
+  Cloud NAT, and the node running both warm tiers. Model generation is
+  usage-driven. Roughly ₪220–280/month.
+- Two warm tiers is a deliberate cost-for-latency trade: an idle worker costs
+  ~₪90/month and removes 4m43s from the first request after a quiet period.

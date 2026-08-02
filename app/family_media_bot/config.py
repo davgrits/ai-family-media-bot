@@ -1,5 +1,6 @@
 """Application settings, sourced from environment variables (and an optional
-`.env`). Every field has a local-dev default so the stub runs with no AWS."""
+`.env`). Every field has a local-dev default, so the app runs on a laptop with
+no cloud account and no credentials."""
 
 from __future__ import annotations
 
@@ -28,10 +29,12 @@ class Settings(BaseSettings):
     log_format: Literal["json", "console"] = "json"
 
     # --- Swap points (interfaces) ---
-    queue: Literal["inmemory", "sqs", "pubsub"] = "inmemory"
-    story_provider: Literal["fake", "bedrock", "vertex"] = "fake"
-    image_provider: Literal["fake", "bedrock", "vertex"] = "fake"
-    storage: Literal["local", "s3", "gcs"] = "local"
+    # Each port has a local fake for laptop runs and a GCP adapter for the
+    # cluster. factory.py is the only place that reads these.
+    queue: Literal["inmemory", "pubsub"] = "inmemory"
+    story_provider: Literal["fake", "vertex"] = "fake"
+    image_provider: Literal["fake", "vertex"] = "fake"
+    storage: Literal["local", "gcs"] = "local"
     local_storage_dir: str = "./var/media"
 
     # --- Telegram ---
@@ -45,16 +48,6 @@ class Settings(BaseSettings):
     # --- OpenTelemetry ---
     otel_exporter_otlp_endpoint: str = ""
     otel_service_name: str = "family-media-bot"
-
-    # --- AWS / Bedrock / S3 ---
-    aws_region: str = "us-east-1"
-    s3_bucket: str = ""
-    sqs_queue_url: str = ""
-    bedrock_text_model_id: str = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
-    # Nova Canvas went Legacy on Bedrock; Stability Image Core is the active
-    # text-to-image model, but only in us-west-2 — hence the separate region.
-    bedrock_image_model_id: str = "stability.stable-image-core-v1:1"
-    bedrock_image_region: str = "us-west-2"
 
     # --- GCP / Vertex AI / GCS / Pub/Sub ---
     # These use Application Default Credentials. On GKE, Workload Identity

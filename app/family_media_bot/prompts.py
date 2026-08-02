@@ -1,6 +1,6 @@
 """Prompt composition and the bedtime-content guardrails.
 
-The age-appropriate framing lives here so every provider (fake or Bedrock) and
+The age-appropriate framing lives here so every provider (fake or Vertex AI) and
 every mode inherits the same constraint from the contract: *gentle,
 age-appropriate bedtime content*.
 """
@@ -11,7 +11,7 @@ import random
 
 from .models import Mode
 
-# Used as the system prompt by BedrockStoryProvider, and as the shared contract
+# Used as the system prompt by VertexStoryProvider, and as the shared contract
 # for what a "good" story looks like. Characters are described in text only —
 # never from photos of real children.
 BEDTIME_SYSTEM_PROMPT = (

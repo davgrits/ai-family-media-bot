@@ -7,9 +7,8 @@ metadata:
     {{- include "family-media-bot.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker
 spec:
-  # KEDA takes ownership immediately after creation. Starting at the configured
-  # minimum prevents an unnecessary Spot node during the Helm install.
-  replicas: {{ .Values.worker.minReplicaCount }}
+  # One warm worker, deliberately. See values.yaml for the measurement behind it.
+  replicas: {{ .Values.worker.replicaCount }}
   selector:
     matchLabels:
       {{- include "family-media-bot.selectorLabels" . | nindent 6 }}
@@ -23,10 +22,6 @@ spec:
         app.kubernetes.io/component: worker
     spec:
       serviceAccountName: {{ include "family-media-bot.name" . }}
-      nodeSelector:
-        {{- toYaml .Values.worker.nodeSelector | nindent 8 }}
-      tolerations:
-        {{- toYaml .Values.worker.tolerations | nindent 8 }}
       terminationGracePeriodSeconds: 120
       containers:
         - name: worker

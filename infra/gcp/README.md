@@ -4,17 +4,18 @@ This is a standalone Terraform root for the GCP deployment. It creates:
 
 - a custom VPC, zonal VPC-native GKE and Cloud NAT (private nodes; Telegram is
   the only required public egress);
-- a warm on-demand web node pool and a tainted Spot worker node pool that can
-  scale to zero;
+- a warm on-demand web node pool and a tainted Spot worker node pool;
 - Artifact Registry, a private 30-day GCS media bucket, and Pub/Sub jobs plus
   dead-letter topic/subscription;
 - least-privilege Google service accounts wired to Kubernetes with Workload
-  Identity (app and KEDA are distinct identities).
+  Identity.
 
 It enables Vertex AI and grants `roles/aiplatform.user` only to the application
-workload identity. The selected application defaults are Gemini 2.5 Flash for
-stories and Gemini 2.5 Flash Image for illustrations. The image adapter also
-supports Imagen model IDs when the project has Model Garden access.
+workload identity. The application defaults are `gemini-3.5-flash` for stories
+and `gemini-2.5-flash-image` for illustrations — the latter chosen because it
+accepts reference images, which is what keeps a family character recognisable
+across illustrations. The image adapter also supports Imagen model IDs when the
+project has Model Garden access.
 
 ## Prerequisites
 
@@ -67,18 +68,16 @@ gcloud container clusters get-credentials \
   --project "$(terraform output -raw project_id)"
 ```
 
-The values consumed by `deploy/values/gcp.yaml` are `artifact_registry_repository`,
-`jobs_topic_name`, `jobs_subscription_name`, `media_bucket_name`, and the two
-Workload Identity Google service account emails.
+The values consumed by `deploy/values/prod.yaml` are
+`artifact_registry_repository`, `jobs_topic_name`, `jobs_subscription_name`,
+`media_bucket_name`, and `app_google_service_account_email`.
 
-## Deploy the GCP application
+## Deploy the application
 
-The application uses the shared AWS/GCP Helm chart at
-[`deploy/charts/family-media-bot`](../../deploy/charts/family-media-bot). It
-uses [`deploy/values/gcp.yaml`](../../deploy/values/gcp.yaml) to select native
-Pub/Sub, GCS, Vertex AI, and Workload Identity settings.
+The application uses the Helm chart at
+[`deploy/charts/family-media-bot`](../../deploy/charts/family-media-bot) with
+[`deploy/values/prod.yaml`](../../deploy/values/prod.yaml).
 
 After this Terraform root has been applied, follow the chart's
 [deployment guide](../../deploy/charts/family-media-bot/README.md) to build and
-push the container, install KEDA with its separate Workload Identity, create
-the Telegram secret, and install the application release.
+push the container, create the Telegram secret, and install the release.

@@ -1,5 +1,6 @@
 """LocalDirStorage — dev implementation of StoragePort. Writes PNGs under
-`<base>/generated/<job_id>.png`, mirroring the S3 key layout from the contract."""
+`<base>/generated/<job_id>.png`, mirroring the object key layout in the
+contract."""
 
 from __future__ import annotations
 

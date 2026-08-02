@@ -1,6 +1,6 @@
 """StoryProvider — generates the bedtime story text.
 
-Dev impl: FakeStoryProvider. Prod impl: BedrockStoryProvider (text model).
+Dev impl: FakeStoryProvider. Prod impl: VertexStoryProvider (text model).
 """
 
 from __future__ import annotations

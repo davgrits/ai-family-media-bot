@@ -38,7 +38,7 @@ QUEUE_WAIT_DURATION = Histogram(
 # Per-job cost — observed once per job (sum of text + image calls).
 JOB_COST = Histogram(
     "fmb_job_cost_usd",
-    "Per-job Bedrock cost in USD (text call + image call).",
+    "Per-job Vertex AI cost in USD (text call + image call).",
     ["mode"],
     buckets=(0, 0.001, 0.005, 0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1.0),
 )
@@ -47,7 +47,7 @@ JOB_COST = Histogram(
 # (prometheus_client appends _total → fmb_cost_usd_total).
 JOB_COST_TOTAL = Counter(
     "fmb_cost_usd",
-    "Cumulative Bedrock cost in USD.",
+    "Cumulative Vertex AI cost in USD.",
     ["mode"],
 )
 
