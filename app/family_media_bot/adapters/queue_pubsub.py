@@ -149,7 +149,10 @@ class PubSubQueue(QueuePort):
             message.nack()
             return
 
-        delivery = QueueDelivery(job=job, receipt=receipt)
+        # delivery_attempt is populated only when the subscription carries a
+        # dead-letter policy, which Terraform configures. None otherwise.
+        attempt = int(getattr(message, "delivery_attempt", None) or 0)
+        delivery = QueueDelivery(job=job, receipt=receipt, attempt=attempt)
         self._buffered[receipt] = message
         deliveries.put_nowait(delivery)
         metrics.QUEUE_WAIT_DURATION.labels(mode=job.mode.value).observe(queue_wait)
@@ -160,6 +163,7 @@ class PubSubQueue(QueuePort):
                 "mode": job.mode.value,
                 "message_id": str(message.message_id),
                 "queue_wait_s": round(queue_wait, 3),
+                "attempt": attempt,
             },
         )
 

@@ -36,7 +36,10 @@ class Pipeline:
         self._storage = storage
         self._telegram = telegram
 
-    async def process(self, job: Job) -> bool:
+    async def process(self, job: Job, notify_on_failure: bool = True) -> bool:
+        """Run one job. `notify_on_failure` is False while retries remain, so a
+        job that fails and is redelivered apologises to the chat once rather
+        than once per delivery attempt."""
         mode = job.mode.value
         started = time.perf_counter()
 
@@ -53,7 +56,13 @@ class Pipeline:
                 story = await self._story.generate(job.mode, job.prompt)
                 logger.info(
                     "story done",
-                    extra={"job_id": job.job_id, "chars": len(story.text), "model": story.model_id},
+                    extra={
+                        "job_id": job.job_id,
+                        "chars": len(story.text),
+                        "model": story.model_id,
+                        "tokens_out": story.tokens_out,
+                        "tokens_thought": story.tokens_thought,
+                    },
                 )
                 # 2. Illustration prompt: prefer the model's own English hint,
                 # fall back to deriving one from the story text.
@@ -64,7 +73,11 @@ class Pipeline:
                 image = await self._image.generate(illustration_prompt)
                 logger.info(
                     "image done",
-                    extra={"job_id": job.job_id, "bytes": len(image.png_bytes), "model": image.model_id},
+                    extra={
+                        "job_id": job.job_id,
+                        "bytes": len(image.png_bytes),
+                        "model": image.model_id,
+                    },
                 )
                 # 4. Persist the story text and the PNG.
                 await self._storage.save(job.job_id, story.text.encode("utf-8"), "text/plain")
@@ -100,8 +113,15 @@ class Pipeline:
             except Exception as exc:
                 metrics.JOBS_PROCESSED.labels(mode=mode, status="error").inc()
                 span.record_exception(exc)
-                logger.exception("job failed", extra={"job_id": job.job_id, "mode": mode})
-                # Tell the chat instead of failing silently.
+                logger.exception(
+                    "job failed",
+                    extra={"job_id": job.job_id, "mode": mode, "final": notify_on_failure},
+                )
+                # Tell the chat instead of failing silently — but only once the
+                # retries are exhausted. Apologising on every delivery attempt
+                # would send the same message five times before the DLQ.
+                if not notify_on_failure:
+                    return False
                 try:
                     await self._telegram.send_text(
                         job.chat_id,

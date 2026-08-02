@@ -51,7 +51,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             pipeline = Pipeline(
                 app.state.story, app.state.image, app.state.storage, app.state.telegram
             )
-            worker = Worker(app.state.queue, pipeline, settings.worker_concurrency)
+            worker = Worker(
+                app.state.queue,
+                pipeline,
+                settings.worker_concurrency,
+                settings.pubsub_max_delivery_attempts,
+            )
             await worker.start()
             app.state.worker = worker
 

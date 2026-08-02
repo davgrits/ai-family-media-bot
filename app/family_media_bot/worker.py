@@ -15,12 +15,28 @@ logger = logging.getLogger(__name__)
 
 
 class Worker:
-    def __init__(self, queue: QueuePort, pipeline: Pipeline, concurrency: int = 1) -> None:
+    def __init__(
+        self,
+        queue: QueuePort,
+        pipeline: Pipeline,
+        concurrency: int = 1,
+        max_delivery_attempts: int = 5,
+    ) -> None:
         self._queue = queue
         self._pipeline = pipeline
         self._concurrency = max(1, concurrency)
+        # Must match the subscription's dead-letter max_delivery_attempts, so
+        # the worker knows which attempt is the last one before the DLQ.
+        self._max_delivery_attempts = max(1, max_delivery_attempts)
         self._tasks: list[asyncio.Task] = []
         self._stop = asyncio.Event()
+
+    def _is_final_attempt(self, delivery: QueueDelivery) -> bool:
+        """A provider that does not report an attempt count (in-memory dev
+        queue) never retries, so every delivery is final."""
+        if delivery.attempt <= 0:
+            return True
+        return delivery.attempt >= self._max_delivery_attempts
 
     async def start(self) -> None:
         self._stop.clear()
@@ -39,7 +55,8 @@ class Worker:
                     metrics.QUEUE_DEPTH.set(await self._queue.depth())
                 except Exception:
                     pass
-                if await self._pipeline.process(delivery.job):
+                notify = self._is_final_attempt(delivery)
+                if await self._pipeline.process(delivery.job, notify_on_failure=notify):
                     await self._queue.ack(delivery)
                 else:
                     await self._queue.nack(delivery)

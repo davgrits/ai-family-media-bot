@@ -18,6 +18,11 @@ class QueueDelivery:
 
     job: Job
     receipt: str = ""
+    # 1-based redelivery counter, or 0 when the provider does not report one.
+    # Lets the pipeline tell "this failed and will be retried" apart from
+    # "this failed for the last time", so the chat gets one apology per
+    # request instead of one per delivery attempt.
+    attempt: int = 0
 
 
 class QueuePort(abc.ABC):

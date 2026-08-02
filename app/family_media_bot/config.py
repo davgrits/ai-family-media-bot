@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     gcs_bucket: str = ""
     pubsub_topic_name: str = ""
     pubsub_subscription_name: str = ""
+    # Must match the subscription's dead_letter_policy.max_delivery_attempts
+    # in infra/gcp/pubsub.tf. The worker uses it to recognise the last attempt
+    # before the DLQ, so the chat is apologised to once, not once per retry.
+    pubsub_max_delivery_attempts: int = 5
     vertex_text_location: str = "global"
     vertex_image_location: str = "us-central1"
     vertex_text_model_id: str = "gemini-3.5-flash"

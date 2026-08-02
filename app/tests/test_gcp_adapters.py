@@ -5,6 +5,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from google.genai.types import FinishReason, ThinkingLevel
+
 from family_media_bot.adapters.image_vertex import VertexImageProvider
 from family_media_bot.adapters.queue_pubsub import PubSubQueue
 from family_media_bot.adapters.storage_gcs import GcsStorage
@@ -246,6 +248,106 @@ class VertexAdapterTests(unittest.IsolatedAsyncioTestCase):
             project="demo-project",
             location="global",
         )
+
+    @patch("family_media_bot.adapters.story_vertex.genai.Client")
+    async def test_story_budget_covers_thinking_and_non_latin_tokens(
+        self, client_class
+    ) -> None:
+        client = client_class.return_value
+        client.models.generate_content.return_value = SimpleNamespace(
+            text="Жила-была звезда.",
+            usage_metadata=SimpleNamespace(prompt_token_count=1, candidates_token_count=1),
+        )
+        provider = VertexStoryProvider(self.settings)
+
+        await provider.generate(Mode.FAIRYTALE, "prompt")
+
+        config = client.models.generate_content.call_args.kwargs["config"]
+        # 220 words of Cyrillic plus a reasoning reserve. The previous 1024
+        # budget was consumed by thinking, truncating the story to a fragment.
+        self.assertEqual(config.max_output_tokens, 220 * 4 + 2048)
+        self.assertEqual(config.thinking_config.thinking_level, ThinkingLevel.MINIMAL)
+
+    @patch("family_media_bot.adapters.story_vertex.genai.Client")
+    async def test_story_truncated_at_token_ceiling_is_rejected(self, client_class) -> None:
+        client = client_class.return_value
+        client.models.generate_content.return_value = SimpleNamespace(
+            text="Жила-была зв",
+            candidates=[SimpleNamespace(finish_reason=FinishReason.MAX_TOKENS)],
+            usage_metadata=SimpleNamespace(prompt_token_count=12, candidates_token_count=4),
+        )
+        provider = VertexStoryProvider(self.settings)
+
+        # A half-sentence must fail the job and be retried, never delivered.
+        with self.assertRaisesRegex(RuntimeError, "MAX_TOKENS"):
+            await provider.generate(Mode.FAIRYTALE, "prompt")
+
+    @patch("family_media_bot.adapters.story_vertex.genai.Client")
+    async def test_only_a_clean_stop_is_accepted(self, client_class) -> None:
+        client = client_class.return_value
+        provider = VertexStoryProvider(self.settings)
+
+        # Rejecting only MAX_TOKENS would still let these ship whatever partial
+        # text the model emitted before it stopped.
+        for reason in (
+            FinishReason.SAFETY,
+            FinishReason.RECITATION,
+            FinishReason.BLOCKLIST,
+            FinishReason.PROHIBITED_CONTENT,
+        ):
+            with self.subTest(finish_reason=reason):
+                client.models.generate_content.return_value = SimpleNamespace(
+                    text="Жила-была звезда, и вдруг",
+                    candidates=[SimpleNamespace(finish_reason=reason)],
+                    usage_metadata=SimpleNamespace(
+                        prompt_token_count=12, candidates_token_count=6
+                    ),
+                )
+                with self.assertRaises(RuntimeError):
+                    await provider.generate(Mode.FAIRYTALE, "prompt")
+
+    @patch("family_media_bot.adapters.story_vertex.genai.Client")
+    async def test_all_budget_spent_on_thinking_reports_the_real_cause(
+        self, client_class
+    ) -> None:
+        client = client_class.return_value
+        # The canonical failure: thinking consumed the whole budget and no
+        # story was emitted. Checking emptiness first would misreport this as
+        # "empty response" and hide the token ceiling.
+        client.models.generate_content.return_value = SimpleNamespace(
+            text="",
+            candidates=[SimpleNamespace(finish_reason=FinishReason.MAX_TOKENS)],
+            usage_metadata=SimpleNamespace(
+                prompt_token_count=12,
+                candidates_token_count=0,
+                thoughts_token_count=2928,
+            ),
+        )
+        provider = VertexStoryProvider(self.settings)
+
+        with self.assertRaisesRegex(RuntimeError, "MAX_TOKENS"):
+            await provider.generate(Mode.FAIRYTALE, "prompt")
+
+    @patch("family_media_bot.adapters.story_vertex.genai.Client")
+    async def test_thinking_tokens_are_billed_at_the_output_rate(self, client_class) -> None:
+        client = client_class.return_value
+        client.models.generate_content.return_value = SimpleNamespace(
+            text="Жила-была звезда.",
+            usage_metadata=SimpleNamespace(
+                prompt_token_count=12,
+                candidates_token_count=34,
+                thoughts_token_count=100,
+            ),
+        )
+        provider = VertexStoryProvider(self.settings)
+
+        result = await provider.generate(Mode.FAIRYTALE, "prompt")
+
+        self.assertEqual(result.tokens_out, 34)
+        self.assertEqual(result.tokens_thought, 100)
+        # (12 * 1.50 + (34 + 100) * 9.00) / 1e6. Excluding thoughts here
+        # understated every job's cost by the reasoning spend.
+        self.assertEqual(result.cost_usd, 0.001224)
 
     @patch("family_media_bot.adapters.image_vertex.genai.Client")
     async def test_gemini_image_generation_uses_production_defaults(
