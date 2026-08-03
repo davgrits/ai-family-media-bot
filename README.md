@@ -19,28 +19,63 @@ entry points — long polling and `/webhook` — only **enqueue**; a worker gene
 flowchart LR
     TG["Telegram Bot API"]
 
-    subgraph GKE["GKE · one zonal cluster, private nodes, one node pool"]
-        WEB["web<br/>always warm<br/>enqueue only"]
-        WRK["worker<br/>always warm<br/>generation"]
+    subgraph VPC["VPC · private nodes, no public IPs"]
+        NAT["Cloud NAT<br/>the only egress"]
+        subgraph GKE["GKE · 1 zonal cluster · 1 node pool"]
+            WEB["web · warm<br/>enqueue only"]
+            WRK["worker · warm<br/>generation"]
+            CM["registry ConfigMap<br/>the family"]
+        end
     end
 
-    PS["Pub/Sub<br/>jobs + DLQ after 5"]
+    PS[["Pub/Sub · jobs"]]
+    DLQ[["dead-letter<br/>after 5 attempts"]]
     AI["Vertex AI<br/>gemini-3.5-flash<br/>gemini-2.5-flash-image"]
-    GCS[("GCS media<br/>private · 30-day expiry")]
+    GCS[("GCS · private · 30-day expiry")]
     WI["Workload Identity<br/>keyless — no key files"]
 
-    TG <-->|"Bot API"| WEB
+    WEB -->|"long poll, outbound"| NAT
+    NAT <--> TG
+    WRK -->|"reply"| NAT
     WEB -->|"publish"| PS
     PS -->|"streaming pull"| WRK
-    WRK --> AI
+    PS -.->|"5 failures"| DLQ
+    WRK -->|"Private Google Access"| AI
     WRK --> GCS
-    WRK -->|"story + image"| TG
+    CM -.-> WEB
+    CM -.-> WRK
     WI -.-> WEB
     WI -.-> WRK
 ```
 
-Two tiers because their latency profiles differ: intake answers Telegram in
-milliseconds, generation takes seconds. Both stay warm.
+Nothing reaches in. The bot polls Telegram **outbound** through Cloud NAT, which
+is why there is no ingress, no load balancer, and no public endpoint. Traffic to
+Vertex AI, GCS, and Pub/Sub never leaves Google's network at all.
+
+One job, end to end:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant F as Family
+    participant W as web
+    participant P as Pub/Sub
+    participant K as worker
+    participant V as Vertex AI
+
+    F->>W: /fairytale
+    W->>P: publish job
+    W-->>F: "writing your story…"
+    Note over W,P: intake answers in milliseconds
+    P->>K: streaming pull, seconds not minutes
+    K->>V: story · gemini-3.5-flash
+    V-->>K: text + ILLUSTRATION line
+    K->>V: image · gemini-2.5-flash-image
+    V-->>K: PNG
+    K->>K: save to GCS
+    K-->>F: story + illustration
+    Note over K: ~13.7s total · ack only now
+```
 
 Every cloud integration sits behind an interface, selected by environment
 variable and validated at startup:
