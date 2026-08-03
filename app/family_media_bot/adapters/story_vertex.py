@@ -8,6 +8,7 @@ from google import genai
 from google.genai.types import (
     FinishReason,
     GenerateContentConfig,
+    HttpOptions,
     ThinkingConfig,
     ThinkingLevel,
 )
@@ -42,6 +43,16 @@ _THINKING_TOKEN_RESERVE = 2048
 # to follow the ILLUSTRATION output contract without spending the budget.
 _THINKING_LEVEL = ThinkingLevel.MINIMAL
 
+# Milliseconds, not seconds — the SDK's unit, and an easy thing to get wrong by a
+# factor of a thousand.
+#
+# This is the bound that actually matters. The worker wraps each job in
+# asyncio.wait_for, but the model call runs in asyncio.to_thread, and threads are
+# not cancellable: wait_for returns control while the thread keeps running,
+# orphaned, holding a connection. Only an HTTP timeout stops it. Sized so the
+# story and image calls together stay inside the worker's 90s job budget.
+_REQUEST_TIMEOUT_MS = 40_000
+
 
 class VertexStoryProvider(StoryProvider):
     def __init__(self, settings: Settings) -> None:
@@ -65,6 +76,7 @@ class VertexStoryProvider(StoryProvider):
             vertexai=True,
             project=settings.gcp_project_id,
             location=self._location,
+            http_options=HttpOptions(timeout=_REQUEST_TIMEOUT_MS),
         )
 
     def _invoke(self, prompt: str, language: str):

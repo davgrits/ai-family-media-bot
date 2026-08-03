@@ -21,6 +21,8 @@ class Worker:
         pipeline: Pipeline,
         concurrency: int = 1,
         max_delivery_attempts: int = 5,
+        job_timeout: float = 90.0,
+        drain_timeout: float = 30.0,
     ) -> None:
         self._queue = queue
         self._pipeline = pipeline
@@ -28,6 +30,11 @@ class Worker:
         # Must match the subscription's dead-letter max_delivery_attempts, so
         # the worker knows which attempt is the last one before the DLQ.
         self._max_delivery_attempts = max(1, max_delivery_attempts)
+        # Measured pipeline time is ~14s. 90s is generous headroom while still
+        # far under terminationGracePeriodSeconds, so a hung job cannot outlive
+        # the pod's shutdown budget.
+        self._job_timeout = job_timeout
+        self._drain_timeout = drain_timeout
         self._tasks: list[asyncio.Task] = []
         self._stop = asyncio.Event()
 
@@ -56,11 +63,26 @@ class Worker:
                 except Exception:
                     pass
                 notify = self._is_final_attempt(delivery)
-                if await self._pipeline.process(delivery.job, notify_on_failure=notify):
+                # Bound the job. Neither Vertex call had an upper time bound, so
+                # a hung model call would block the only worker indefinitely
+                # while its Pub/Sub lease was extended underneath it.
+                processed = await asyncio.wait_for(
+                    self._pipeline.process(delivery.job, notify_on_failure=notify),
+                    timeout=self._job_timeout,
+                )
+                if processed:
                     await self._queue.ack(delivery)
                 else:
                     await self._queue.nack(delivery)
                 delivery = None
+            except TimeoutError:
+                logger.error(
+                    "job exceeded its time budget; releasing for retry",
+                    extra={"worker": index, "timeout_s": self._job_timeout},
+                )
+                if delivery is not None:
+                    await self._release(delivery, index)
+                    delivery = None
             except asyncio.CancelledError:
                 if delivery is not None:
                     await self._release(delivery, index)
@@ -80,13 +102,35 @@ class Worker:
             )
 
     async def stop(self) -> None:
+        """Signal, drain, then cancel.
+
+        Previously this set the flag and cancelled in the same breath, so every
+        rolling update discarded whatever was mid-generation. Worse, cancelling
+        inside `telegram.send_story_and_image` could deliver a story and then nack
+        it, so the retry sent the family a second, different story for one request.
+
+        Now the loops get a window to finish the job they hold. Whatever is still
+        running after it is cancelled and nacked, which is correct — the work is
+        durable in Pub/Sub either way.
+        """
         self._stop.set()
-        for task in self._tasks:
+
+        done, pending = await asyncio.wait(self._tasks, timeout=self._drain_timeout)
+        if pending:
+            logger.warning(
+                "drain window elapsed with jobs still running; cancelling",
+                extra={"draining": len(pending), "drain_timeout_s": self._drain_timeout},
+            )
+        else:
+            logger.info("worker loops drained cleanly", extra={"drained": len(done)})
+
+        for task in pending:
             task.cancel()
-        for task in self._tasks:
+        for task in pending:
             try:
                 await task
             except asyncio.CancelledError:
                 pass
+
         await self._queue.close()
         logger.info("worker stopped")

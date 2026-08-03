@@ -270,6 +270,14 @@ class PubSubQueue(QueuePort):
 
             # Release everything the process has leased before stopping the
             # stream so the dispatch thread can send the nacks.
+            #
+            # This ordering is load-bearing and invisible. It works because
+            # Dispatcher.stop() joins its worker thread and QueueCallbackWorker
+            # drains everything already queued ahead of the poison pill — so
+            # nacks issued now are actually transmitted. Reversing these two
+            # steps (cancel the stream, then nack) silently drops the nacks, and
+            # every message waits out its ack deadline instead. Nothing fails
+            # loudly if that happens; jobs just get slower to retry.
             messages = [*self._buffered.values(), *self._in_flight.values()]
             self._buffered.clear()
             self._in_flight.clear()

@@ -11,7 +11,7 @@ import asyncio
 import logging
 
 from google import genai
-from google.genai.types import GenerateContentConfig, GenerateImagesConfig
+from google.genai.types import GenerateContentConfig, GenerateImagesConfig, HttpOptions
 
 from ..config import Settings
 from ..ports.image import ImageProvider, ImageResult
@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 # entire style suffix — quietly breaking the feature it was supposed to guard.
 # Gemini accepts far more than this; the cap exists only to bound accidents.
 _MAX_PROMPT_CHARS = 4000
+
+# Milliseconds. See story_vertex for why this, and not the worker's wait_for, is
+# the bound that actually stops a hung call: to_thread is not cancellable.
+_REQUEST_TIMEOUT_MS = 40_000
 _IMAGE_COST_PER_IMAGE_USD = {
     "gemini-2.5-flash-image": 0.039,
     "imagen-4.0-fast-generate-001": 0.02,
@@ -49,6 +53,7 @@ class VertexImageProvider(ImageProvider):
             vertexai=True,
             project=settings.gcp_project_id,
             location=settings.vertex_image_location,
+            http_options=HttpOptions(timeout=_REQUEST_TIMEOUT_MS),
         )
 
     def _cap(self, prompt: str) -> str:

@@ -5,7 +5,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from google.genai.types import FinishReason, ThinkingLevel
+from google.genai.types import FinishReason, HttpOptions, ThinkingLevel
 
 from family_media_bot.adapters.image_vertex import VertexImageProvider
 from family_media_bot.adapters.queue_pubsub import PubSubQueue
@@ -245,6 +245,7 @@ class VertexAdapterTests(unittest.IsolatedAsyncioTestCase):
             vertexai=True,
             project="demo-project",
             location="global",
+            http_options=HttpOptions(timeout=40_000),
         )
 
     @patch("family_media_bot.adapters.story_vertex.genai.Client")
@@ -372,6 +373,7 @@ class VertexAdapterTests(unittest.IsolatedAsyncioTestCase):
             vertexai=True,
             project="demo-project",
             location="us-central1",
+            http_options=HttpOptions(timeout=40_000),
         )
         _, kwargs = client.models.generate_content.call_args
         self.assertEqual(kwargs["model"], "gemini-2.5-flash-image")
@@ -401,6 +403,7 @@ class VertexAdapterTests(unittest.IsolatedAsyncioTestCase):
             vertexai=True,
             project="demo-project",
             location="us-central1",
+            http_options=HttpOptions(timeout=40_000),
         )
         _, kwargs = client.models.generate_images.call_args
         self.assertEqual(kwargs["model"], "imagen-4.0-generate-001")
