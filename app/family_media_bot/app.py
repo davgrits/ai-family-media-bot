@@ -16,12 +16,11 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from . import commands, factory, metrics
+from . import characters, factory, metrics
 from .config import Settings, get_settings
+from .dispatch import Dispatcher
 from .logging_setup import setup_logging
-from .models import new_job
 from .pipeline import Pipeline
-from .prompts import compose_prompt
 from .telemetry import setup_telemetry
 from .worker import Worker
 
@@ -43,6 +42,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.image = factory.build_image(settings)
         app.state.storage = factory.build_storage(settings)
         app.state.telegram = factory.build_telegram(settings)
+        # Loaded once per process, not per request: one snapshot per pod means
+        # every job that pod handles used the same cast, so a story and its
+        # illustration can never disagree about who is in them.
+        app.state.characters = characters.load_registry(
+            settings.characters_file, required=settings.characters_required
+        )
+        app.state.dispatcher = Dispatcher(app.state.telegram, app.state.queue)
         app.state.worker = None
 
         app.state.poller = None
@@ -63,7 +69,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if settings.telegram_polling and settings.telegram_bot_token:
             from .poller import TelegramPoller
 
-            poller = TelegramPoller(app.state.telegram, app.state.queue)
+            poller = TelegramPoller(app.state.telegram, app.state.dispatcher)
             await poller.start()
             app.state.poller = poller
 
@@ -138,22 +144,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             metrics.WEBHOOK_UPDATES.labels(result="invalid").inc()
             return {"ok": True}
 
-        parsed = commands.parse(update)
-        if parsed is None:
-            metrics.WEBHOOK_UPDATES.labels(result="ignored").inc()
-            return {"ok": True}
-
-        # Compose the prompt and enqueue — then return immediately.
-        prompt = compose_prompt(parsed.mode, parsed.args)
-        job = new_job(parsed.chat_id, parsed.mode, prompt)
-        await app.state.queue.enqueue(job)
-
-        metrics.WEBHOOK_UPDATES.labels(result="accepted").inc()
-        metrics.JOBS_ENQUEUED.labels(mode=parsed.mode.value).inc()
-        logger.info(
-            "job enqueued",
-            extra={"job_id": job.job_id, "mode": job.mode.value},
-        )
+        # One shared dispatcher for both entry points, so the webhook and the
+        # poller cannot drift apart. It enqueues and returns immediately.
+        result = await app.state.dispatcher.handle_update(update)
+        metrics.WEBHOOK_UPDATES.labels(result=result).inc()
         return {"ok": True}
 
     return app

@@ -29,8 +29,12 @@ class StoryResult:
 
 class StoryProvider(abc.ABC):
     @abc.abstractmethod
-    async def generate(self, mode: Mode, prompt: str) -> StoryResult:
-        """Produce an age-appropriate bedtime story for the composed prompt."""
+    async def generate(self, mode: Mode, prompt: str, language: str = "ru") -> StoryResult:
+        """Produce an age-appropriate bedtime story for the composed prompt.
+
+        `language` selects the story's output language. It is not baked into the
+        prompt so the provider can also use it to pick a system prompt.
+        """
 
     @abc.abstractmethod
     async def check_ready(self) -> bool:

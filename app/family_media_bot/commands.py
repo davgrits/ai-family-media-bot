@@ -1,5 +1,10 @@
-"""Parse a Telegram update into a bot command. Pure functions — no I/O — so the
-webhook handler stays fast and easy to test."""
+"""Parse a Telegram update into a bot command.
+
+Pure functions, no I/O. That is what lets the dispatcher be tested without a
+Telegram client, a queue, or an event loop, and it is why this module stays free
+of the registry and the i18n table — both of which are inputs to a *reply*, not
+to parsing.
+"""
 
 from __future__ import annotations
 
@@ -7,17 +12,18 @@ from dataclasses import dataclass
 
 from .models import Mode
 
-# Bot command -> generation mode (MVP set from the contract).
+# Bot command -> generation mode.
 _COMMAND_MODES = {
     "/fairytale": Mode.FAIRYTALE,
     "/custom": Mode.CUSTOM,
     "/surprise": Mode.RANDOM,
 }
 
+_LANGUAGE_PREFIX = "lang:"
+
 
 @dataclass
 class ParsedCommand:
-    chat_id: int
     mode: Mode
     args: str
 
@@ -32,16 +38,44 @@ def extract_message(update: dict) -> tuple[int | None, str]:
     return chat_id, text
 
 
-def parse(update: dict) -> ParsedCommand | None:
-    """Return a ParsedCommand for a recognized `/command`, else None (which the
-    webhook treats as 'ignore but still 200')."""
-    chat_id, text = extract_message(update)
-    if chat_id is None or not text:
+def language_hint(update: dict) -> str:
+    """Telegram's own `language_code` for the sender, if it offered one.
+
+    Used only when the message carries no explicit token, so a first-time user
+    gets their own language rather than a hardcoded default.
+    """
+    msg = update.get("message") or update.get("edited_message") or {}
+    return ((msg.get("from") or {}).get("language_code")) or ""
+
+
+def split_language_token(text: str) -> tuple[str, str]:
+    """Split a leading `lang:xx` token off a message.
+
+    Returns (language_code, remaining_text); the code is "" when absent. An
+    explicit per-message token is the only stateless way to choose a language —
+    a picker would imply remembering the choice.
+    """
+    stripped = text.strip()
+    if not stripped.lower().startswith(_LANGUAGE_PREFIX):
+        return "", stripped
+
+    token, _, rest = stripped.partition(" ")
+    return token[len(_LANGUAGE_PREFIX) :].lower(), rest.strip()
+
+
+def parse_text(text: str) -> ParsedCommand | None:
+    """Interpret already-cleaned message text.
+
+    A recognised `/command` maps to its mode. Plain text is a custom scene
+    request, which is how the bot is actually used. An unrecognised `/command`
+    returns None so the caller can answer rather than silently ignore.
+    """
+    text = text.strip()
+    if not text:
         return None
 
-    text = text.strip()
     if not text.startswith("/"):
-        return None
+        return ParsedCommand(mode=Mode.CUSTOM, args=text)
 
     head, _, rest = text.partition(" ")
     head = head.split("@", 1)[0].lower()  # strip @botname suffix in group chats
@@ -49,4 +83,4 @@ def parse(update: dict) -> ParsedCommand | None:
     if mode is None:
         return None
 
-    return ParsedCommand(chat_id=chat_id, mode=mode, args=rest.strip())
+    return ParsedCommand(mode=mode, args=rest.strip())

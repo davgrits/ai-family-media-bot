@@ -2,28 +2,60 @@
 
 The age-appropriate framing lives here so every provider (fake or Vertex AI) and
 every mode inherits the same constraint from the contract: *gentle,
-age-appropriate bedtime content*.
+age-appropriate bedtime content*. This module owns what we say to the *model*;
+what the bot says in *chat* lives in i18n.py.
 """
 
 from __future__ import annotations
 
 import random
 
+from .i18n import Lang, resolve
 from .models import Mode
 
-# Used as the system prompt by VertexStoryProvider, and as the shared contract
-# for what a "good" story looks like. Characters are described in text only —
-# never from photos of real children.
-BEDTIME_SYSTEM_PROMPT = (
-    "Ты — добрый рассказчик сказок на ночь для маленьких детей. "
-    "Напиши по запросу короткую, тёплую и спокойную сказку на русском языке, "
-    "примерно 150–200 слов: простые слова, ничего страшного и пугающего, "
-    "уютная концовка, помогающая заснуть. Персонажи описываются только "
-    "словами. После сказки добавь ровно одну отдельную последнюю строку "
-    "строго в формате:\n"
+# The illustration line is requested in English in every story language, because
+# English is the language the image model is good at. Keeping the sentinel itself
+# ASCII also keeps the parser in story_common.py language-independent.
+_ILLUSTRATION_LINE_SPEC = (
     "ILLUSTRATION: <one-line English prompt for a children's book "
     "illustration of this story's key scene>"
 )
+
+# The system prompt per story language, and the shared contract for what a
+# "good" story looks like. Characters are described in text only — never from
+# photographs of real children.
+BEDTIME_SYSTEM_PROMPTS: dict[Lang, str] = {
+    Lang.EN: (
+        "You are a kind bedtime storyteller for young children. Write a short, "
+        "warm, calm story in English, about 150–200 words: simple words, "
+        "nothing scary or frightening, a cozy ending that helps a child fall "
+        "asleep. Characters are described in words only. After the story add "
+        "exactly one separate final line strictly in the format:\n"
+        f"{_ILLUSTRATION_LINE_SPEC}"
+    ),
+    Lang.RU: (
+        "Ты — добрый рассказчик сказок на ночь для маленьких детей. "
+        "Напиши по запросу короткую, тёплую и спокойную сказку на русском языке, "
+        "примерно 150–200 слов: простые слова, ничего страшного и пугающего, "
+        "уютная концовка, помогающая заснуть. Персонажи описываются только "
+        "словами. После сказки добавь ровно одну отдельную последнюю строку "
+        "строго в формате:\n"
+        f"{_ILLUSTRATION_LINE_SPEC}"
+    ),
+    Lang.HE: (
+        "אתה מספר סיפורים טוב־לב לפני השינה לילדים קטנים. כתוב סיפור קצר, חם "
+        "ורגוע בעברית, בערך 150–200 מילים: מילים פשוטות, שום דבר מפחיד, וסוף "
+        "נעים שעוזר להירדם. הדמויות מתוארות במילים בלבד. אחרי הסיפור הוסף "
+        "בדיוק שורה אחרונה אחת, בפורמט הבא:\n"
+        f"{_ILLUSTRATION_LINE_SPEC}"
+    ),
+}
+
+
+def system_prompt(language: str) -> str:
+    """The bedtime system prompt for a story language ('en' | 'ru' | 'he')."""
+    return BEDTIME_SYSTEM_PROMPTS[resolve(language)]
+
 
 _BEDTIME_FRAME = (
     "Write a short, gentle, age-appropriate bedtime story for young children "

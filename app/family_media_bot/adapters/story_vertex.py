@@ -15,7 +15,7 @@ from google.genai.types import (
 from ..config import Settings
 from ..models import Mode
 from ..ports.story import StoryProvider, StoryResult
-from ..prompts import BEDTIME_SYSTEM_PROMPT
+from ..prompts import system_prompt
 from .story_common import split_illustration_hint
 
 _TEXT_PRICES_PER_MILLION_TOKENS = {
@@ -67,12 +67,12 @@ class VertexStoryProvider(StoryProvider):
             location=self._location,
         )
 
-    def _invoke(self, prompt: str):
+    def _invoke(self, prompt: str, language: str):
         return self._client.models.generate_content(
             model=self._model_id,
             contents=prompt,
             config=GenerateContentConfig(
-                system_instruction=BEDTIME_SYSTEM_PROMPT,
+                system_instruction=system_prompt(language),
                 max_output_tokens=self._max_output_tokens,
                 thinking_config=ThinkingConfig(thinking_level=_THINKING_LEVEL),
             ),
@@ -84,8 +84,8 @@ class VertexStoryProvider(StoryProvider):
             return getattr(candidate, "finish_reason", None)
         return None
 
-    async def generate(self, mode: Mode, prompt: str) -> StoryResult:
-        response = await asyncio.to_thread(self._invoke, prompt)
+    async def generate(self, mode: Mode, prompt: str, language: str = "ru") -> StoryResult:
+        response = await asyncio.to_thread(self._invoke, prompt, language)
 
         # Check *why* the model stopped before looking at what it produced.
         # The canonical failure here — thinking consumes the whole budget and

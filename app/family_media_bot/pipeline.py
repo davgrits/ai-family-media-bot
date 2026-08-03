@@ -11,6 +11,7 @@ import logging
 import time
 
 from . import metrics
+from .i18n import t
 from .models import Job
 from .ports.image import ImageProvider
 from .ports.storage import StoragePort
@@ -53,7 +54,7 @@ class Pipeline:
                 )
 
                 # 1. Story first (text model).
-                story = await self._story.generate(job.mode, job.prompt)
+                story = await self._story.generate(job.mode, job.prompt, job.language)
                 logger.info(
                     "story done",
                     extra={
@@ -123,11 +124,9 @@ class Pipeline:
                 if not notify_on_failure:
                     return False
                 try:
-                    await self._telegram.send_text(
-                        job.chat_id,
-                        "Простите, сказка сейчас не получилась 😔 "
-                        "Попробуйте ещё раз через минутку.",
-                    )
+                    # Apologise in the language the story was requested in —
+                    # which is only possible because `language` rides on the Job.
+                    await self._telegram.send_text(job.chat_id, t(job.language, "error_generation"))
                 except Exception:
                     logger.exception("failed to send error message", extra={"job_id": job.job_id})
                 return False
