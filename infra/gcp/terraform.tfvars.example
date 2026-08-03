@@ -1,13 +1,13 @@
 # Copy to terraform.tfvars (which stays uncommitted) and set your values.
 project_id       = "your-gcp-project-id"
 region           = "us-central1"
-cluster_location = "us-central1-a"
+cluster_location = "us-central1-a" # zonal: a single zonal cluster is free of the GKE management fee
 
-# One e2-medium has enough allocatable capacity for GKE system pods and the
-# always-on web tier. The worker pool is separate and interruptible.
-web_machine_type = "e2-medium"
-web_max_nodes    = 1
+# One pool holds GKE's system pods plus the web and worker deployments, with
+# headroom for the worker's rolling-update surge. e2-medium does not fit.
+node_machine_type = "e2-standard-2"
+node_disk_size_gb = 50
 
-# Keep true in normal operation. Set false only immediately before an
-# intentional `terraform destroy`, then set it back if the cluster remains.
+# Keep true in normal operation. Set false only immediately before an intentional
+# `terraform destroy`, then set it back if the cluster remains.
 deletion_protection = true

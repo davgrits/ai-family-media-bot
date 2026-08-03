@@ -44,38 +44,32 @@ variable "services_cidr" {
   default     = "10.25.0.0/20"
 }
 
-variable "web_machine_type" {
-  description = "Always-on web-pool machine type. e2-medium fits GKE system services and the web pod on one node."
-  type        = string
-  default     = "e2-medium"
-}
-
-variable "web_max_nodes" {
-  description = "Maximum always-on web nodes. One e2-medium is cheaper than two e2-small nodes after boot disks."
-  type        = number
-  default     = 1
-
-  validation {
-    condition     = var.web_max_nodes >= 1
-    error_message = "web_max_nodes must be at least one."
-  }
-}
-
-variable "worker_machine_type" {
-  description = "Spot worker-pool machine type. Generation work is retryable."
+variable "node_machine_type" {
+  description = <<-EOT
+    Machine type for the single node pool. e2-standard-2 allocates ~1930m CPU,
+    against ~900m of GKE system requests, 300m for the web and worker pods, and
+    250m of headroom for the worker's rolling-update surge. e2-medium allocates
+    940m and does not fit.
+  EOT
   type        = string
   default     = "e2-standard-2"
 }
 
-variable "worker_max_nodes" {
-  description = "Maximum Spot worker nodes; caps spend during a queue flood."
+variable "node_disk_size_gb" {
+  description = "Node boot disk. The default 100 GB is far more than two small Python containers need."
   type        = number
-  default     = 5
+  default     = 50
 
   validation {
-    condition     = var.worker_max_nodes >= 1
-    error_message = "worker_max_nodes must be at least one."
+    condition     = var.node_disk_size_gb >= 20
+    error_message = "GKE requires at least 20 GB for a node boot disk."
   }
+}
+
+variable "node_disk_type" {
+  description = "pd-standard is cheaper and fast enough; nothing here is disk-bound."
+  type        = string
+  default     = "pd-standard"
 }
 
 variable "media_retention_days" {
