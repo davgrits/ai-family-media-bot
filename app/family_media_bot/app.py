@@ -55,7 +55,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         if settings.run_mode in ("all", "worker"):
             pipeline = Pipeline(
-                app.state.story, app.state.image, app.state.storage, app.state.telegram
+                app.state.story,
+                app.state.image,
+                app.state.storage,
+                app.state.telegram,
+                app.state.characters,
             )
             worker = Worker(
                 app.state.queue,

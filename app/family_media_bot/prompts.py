@@ -10,15 +10,22 @@ from __future__ import annotations
 
 import random
 
+from .characters import Character
 from .i18n import Lang, resolve
 from .models import Mode
 
 # The illustration line is requested in English in every story language, because
 # English is the language the image model is good at. Keeping the sentinel itself
 # ASCII also keeps the parser in story_common.py language-independent.
+#
+# The "by name only" clause prevents a conflict rather than resolving one: the
+# hint supplies the *scene*, the registry supplies *identity*. Given disjoint
+# jobs, the model's description and the committed description cannot contradict
+# each other in the first place.
 _ILLUSTRATION_LINE_SPEC = (
-    "ILLUSTRATION: <one-line English prompt for a children's book "
-    "illustration of this story's key scene>"
+    "ILLUSTRATION: <one-line English prompt describing this story's key scene. "
+    "Refer to characters by name only — do not describe their hair, clothing, "
+    "age, or face. Their appearance is supplied separately.>"
 )
 
 # The system prompt per story language, and the shared contract for what a
@@ -71,17 +78,49 @@ _SURPRISE_SCENARIOS = [
 ]
 
 
-def compose_prompt(mode: Mode, args: str = "") -> str:
-    """Turn a command + its free text into the composed scene prompt (the job's
-    `prompt` field). Always wrapped in the bedtime guardrail framing."""
+# Only the fairytale mode gets the cast. Injecting a character into /custom when
+# the text happens to mention their name would need case-insensitive matching
+# across `id` plus every name in three scripts, and it fails in both directions:
+# a cat named Nika matches inside "Nikaragua", while "Папа" declined as "папе" is
+# missed. A fuzzy matcher whose failures are silent is worse than a clear rule.
+# Deferred deliberately, not forgotten.
+CAST_MODES = frozenset({Mode.FAIRYTALE})
+
+# Used when the registry is empty. Deliberately not the old
+# "mom = kind queen, dad = gentle king" string: that was English text spliced
+# into a Russian story, which is the ancestor of the bug this work exists to fix.
+_NEUTRAL_CAST = "a family of gentle heroes: a parent, a child, and their small animal friend"
+
+# Lifted verbatim from the deleted derive_illustration_prompt — the one part of
+# that function worth keeping. "No text or lettering" is new: image models like
+# to hallucinate storybook captions, and garbled Latin text baked into the
+# picture of a Hebrew story reads as broken.
+_IMAGE_STYLE_SUFFIX = (
+    "Soft watercolor children's book illustration, warm bedtime palette, gentle "
+    "lighting, cozy and reassuring. No text or lettering in the image."
+)
+
+_FALLBACK_SCENE = "a cozy bedtime scene from this story"
+
+# Budget for the image prompt, which the adapter caps at 4,000 characters.
+# 400 + 8 x ~320 + ~200 of scaffolding fits with room to spare.
+_MAX_HINT_CHARS = 400
+
+
+def compose_request(mode: Mode, args: str = "") -> str:
+    """The family's request, framed — this is what goes into `Job.prompt`.
+
+    Contains no character text. The cast is deployment configuration resolved in
+    the worker, so a job that sat in the queue across a registry edit cannot be
+    generated against a stale cast.
+    """
     args = (args or "").strip()
 
     if mode is Mode.FAIRYTALE:
-        roles = args or "mom = kind queen, dad = gentle king, me = brave little knight"
-        return (
-            f"{_BEDTIME_FRAME} A guided fairytale where the family play these "
-            f"roles: {roles}. Weave them into a cozy little adventure."
-        )
+        # `args` is "extra wishes" now, not "the roles" — which is what a family
+        # actually types after /fairytale once the cast lives in a registry.
+        extra = f" Extra wishes from the family: {args}." if args else ""
+        return f"{_BEDTIME_FRAME} A fairytale starring the family as its heroes.{extra}"
 
     if mode is Mode.CUSTOM:
         scene = args or "a calm, happy adventure right before bedtime"
@@ -91,19 +130,58 @@ def compose_prompt(mode: Mode, args: str = "") -> str:
     return f"{_BEDTIME_FRAME} Surprise scenario: {random.choice(_SURPRISE_SCENARIOS)}."
 
 
-def derive_illustration_prompt(story_text: str) -> str:
-    """Derive a one-line illustration prompt *from the generated story* so the
-    picture matches the words (contract: story first, then image)."""
-    first = ""
-    for chunk in story_text.replace("\n", " ").split("."):
-        candidate = chunk.strip()
-        if candidate:
-            first = candidate
-            break
+def compose_story_prompt(request: str, cast: list[Character], language: str) -> str:
+    """The user content for the story model, with `appearance` pasted verbatim.
 
-    words = first.split()
-    summary = " ".join(words[:14]) if words else "a cozy bedtime scene"
+    Verbatim is the requirement, not a stylistic preference: the exact substring
+    in the YAML must be the exact substring in the prompt, because that is what
+    makes the same person recognisable across separate generations.
+
+    Names are language-switched; appearance is not. The model reads an English
+    description and writes Hebrew or Russian prose, which these models do
+    reliably — and an English description is what the *image* model needs, so
+    keeping one canonical form avoids two sources of truth.
+    """
+    if not cast:
+        return f"{request}\n\nThe cast: {_NEUTRAL_CAST}."
+
+    # "this character" rather than a pronoun: inferring he/she/it from an
+    # appearance description is the kind of guess that is wrong in a way nobody
+    # notices until it reaches the child. The model can read the description.
+    lines = []
+    for character in cast:
+        name = character.display_name(language)
+        lines.append(
+            f'- Call this character "{name}" in the story. '
+            f"Appearance: {character.appearance}. Personality: {character.traits}."
+        )
+
     return (
-        f"{summary}. Soft watercolor children's book illustration, warm bedtime "
-        f"palette, gentle lighting, cozy and reassuring."
+        f"{request}\n\n"
+        "The cast, described exactly:\n" + "\n".join(lines) + "\n\n"
+        "Weave them all into one cozy little adventure together, keeping each "
+        "character recognisable."
     )
+
+
+def compose_image_prompt(hint: str, cast: list[Character]) -> str:
+    """The image-model prompt: the model's scene, then identity, then style.
+
+    Ordering is load-bearing. The scene comes from the story model and varies run
+    to run; the appearance comes from a git-committed file reviewed by a human.
+    When they disagree about what a child looks like, the reviewed artifact has to
+    win, so it is stated last and explicitly marked as an override.
+    """
+    scene = (hint or "").strip()[:_MAX_HINT_CHARS] or _FALLBACK_SCENE
+
+    parts = [f"Children's book illustration of this scene: {scene}"]
+
+    if cast:
+        # Always the English name here, never names[lang]: in an image prompt the
+        # name is only a label binding an appearance to a role in the scene, and
+        # Cyrillic or Hebrew tokens are noise to the image model at best.
+        described = "\n".join(f"- {c.display_name('en')}: {c.appearance}." for c in cast)
+        parts.append(f"The characters must look exactly like this, unchanged:\n{described}")
+
+    parts.append(_IMAGE_STYLE_SUFFIX)
+    return "\n\n".join(parts)

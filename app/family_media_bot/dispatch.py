@@ -17,7 +17,7 @@ from . import commands, metrics
 from .i18n import Lang, resolve, t
 from .models import Mode, new_job
 from .ports.queue import QueuePort
-from .prompts import compose_prompt
+from .prompts import compose_request
 from .telegram import TelegramClient
 
 logger = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ class Dispatcher:
         return await self._enqueue(chat_id, parsed.mode, parsed.args, lang)
 
     async def _enqueue(self, chat_id: int, mode: Mode, args: str, lang: Lang) -> str:
-        prompt = compose_prompt(mode, args)
+        prompt = compose_request(mode, args)
         job = new_job(chat_id, mode, prompt, language=lang.value)
         await self._queue.enqueue(job)
 

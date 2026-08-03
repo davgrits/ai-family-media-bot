@@ -8,6 +8,7 @@ whose Model Garden catalogs expose different publisher models.
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from google import genai
 from google.genai.types import GenerateContentConfig, GenerateImagesConfig
@@ -15,7 +16,14 @@ from google.genai.types import GenerateContentConfig, GenerateImagesConfig
 from ..config import Settings
 from ..ports.image import ImageProvider, ImageResult
 
-_MAX_PROMPT_CHARS = 2000
+logger = logging.getLogger(__name__)
+
+# Was 2000, which was a harmless backstop until the cast block existed. Eight
+# characters at 300 characters each plus the scene and style suffix runs to ~3,000,
+# so the old cap would have silently amputated the tail of the cast *and* the
+# entire style suffix — quietly breaking the feature it was supposed to guard.
+# Gemini accepts far more than this; the cap exists only to bound accidents.
+_MAX_PROMPT_CHARS = 4000
 _IMAGE_COST_PER_IMAGE_USD = {
     "gemini-2.5-flash-image": 0.039,
     "imagen-4.0-fast-generate-001": 0.02,
@@ -43,10 +51,21 @@ class VertexImageProvider(ImageProvider):
             location=settings.vertex_image_location,
         )
 
+    def _cap(self, prompt: str) -> str:
+        """Bound the prompt, but say so. A silent slice here removes the style
+        suffix and the tail of the cast, which is exactly the kind of quiet
+        degradation this project keeps finding."""
+        if len(prompt) > _MAX_PROMPT_CHARS:
+            logger.warning(
+                "image prompt truncated",
+                extra={"chars": len(prompt), "limit": _MAX_PROMPT_CHARS},
+            )
+        return prompt[:_MAX_PROMPT_CHARS]
+
     def _invoke_imagen(self, prompt: str) -> tuple[bytes, str]:
         response = self._client.models.generate_images(
             model=self._model_id,
-            prompt=prompt[:_MAX_PROMPT_CHARS],
+            prompt=self._cap(prompt),
             config=GenerateImagesConfig(
                 number_of_images=1,
                 aspect_ratio="1:1",
@@ -62,7 +81,7 @@ class VertexImageProvider(ImageProvider):
     def _invoke_gemini(self, prompt: str) -> tuple[bytes, str]:
         response = self._client.models.generate_content(
             model=self._model_id,
-            contents=prompt[:_MAX_PROMPT_CHARS],
+            contents=self._cap(prompt),
             config=GenerateContentConfig(response_modalities=["IMAGE"]),
         )
         for candidate in response.candidates or []:

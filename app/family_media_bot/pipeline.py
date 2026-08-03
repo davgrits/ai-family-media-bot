@@ -11,12 +11,13 @@ import logging
 import time
 
 from . import metrics
+from .characters import CharacterRegistry
 from .i18n import t
 from .models import Job
 from .ports.image import ImageProvider
 from .ports.storage import StoragePort
 from .ports.story import StoryProvider
-from .prompts import derive_illustration_prompt
+from .prompts import CAST_MODES, compose_image_prompt, compose_story_prompt
 from .telegram import TelegramClient
 from .telemetry import get_tracer
 
@@ -31,11 +32,13 @@ class Pipeline:
         image: ImageProvider,
         storage: StoragePort,
         telegram: TelegramClient,
+        registry: CharacterRegistry | None = None,
     ) -> None:
         self._story = story
         self._image = image
         self._storage = storage
         self._telegram = telegram
+        self._registry = registry or CharacterRegistry()
 
     async def process(self, job: Job, notify_on_failure: bool = True) -> bool:
         """Run one job. `notify_on_failure` is False while retries remain, so a
@@ -53,8 +56,14 @@ class Pipeline:
                     extra={"job_id": job.job_id, "mode": mode},
                 )
 
+                # The cast is resolved here, in the worker, not at enqueue: the
+                # image prompt needs it too, and resolving once means a story and
+                # its illustration can never disagree about who is in them.
+                cast = self._registry.cast() if job.mode in CAST_MODES else []
+
                 # 1. Story first (text model).
-                story = await self._story.generate(job.mode, job.prompt, job.language)
+                story_prompt = compose_story_prompt(job.prompt, cast, job.language)
+                story = await self._story.generate(job.mode, story_prompt, job.language)
                 logger.info(
                     "story done",
                     extra={
@@ -65,11 +74,17 @@ class Pipeline:
                         "tokens_thought": story.tokens_thought,
                     },
                 )
-                # 2. Illustration prompt: prefer the model's own English hint,
-                # fall back to deriving one from the story text.
-                illustration_prompt = story.illustration_hint or derive_illustration_prompt(
-                    story.text
-                )
+                # 2. Illustration prompt: the model's scene plus the cast's
+                # appearance verbatim. A missing hint costs scene specificity,
+                # not identity, so it is a warning rather than a failure — the
+                # story is the product, and it is already paid for and intact.
+                if not story.illustration_hint:
+                    metrics.ILLUSTRATION_HINT_MISSING.inc()
+                    logger.warning(
+                        "story omitted the ILLUSTRATION line; using a generic scene",
+                        extra={"job_id": job.job_id, "model": story.model_id},
+                    )
+                illustration_prompt = compose_image_prompt(story.illustration_hint, cast)
                 # 3. One image (image model).
                 image = await self._image.generate(illustration_prompt)
                 logger.info(

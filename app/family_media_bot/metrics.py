@@ -55,3 +55,13 @@ QUEUE_DEPTH = Gauge(
     "fmb_queue_depth",
     "Approximate number of jobs waiting in the queue.",
 )
+
+# The story model is asked for a trailing ILLUSTRATION line and sometimes skips
+# it. Not a failure — the picture loses scene specificity, not the characters'
+# identity — but worth counting: thinking is pinned to MINIMAL, which plausibly
+# makes the model likelier to drop a formatting instruction. If this climbs, the
+# thinking level is the first thing to revisit.
+ILLUSTRATION_HINT_MISSING = Counter(
+    "fmb_illustration_hint_missing",
+    "Stories that omitted the trailing ILLUSTRATION line.",
+)
