@@ -48,7 +48,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.characters = characters.load_registry(
             settings.characters_file, required=settings.characters_required
         )
-        app.state.dispatcher = Dispatcher(app.state.telegram, app.state.queue)
+        app.state.dispatcher = Dispatcher(app.state.telegram, app.state.queue, app.state.characters)
         app.state.worker = None
 
         app.state.poller = None

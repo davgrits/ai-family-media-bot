@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 
 from . import commands, metrics
+from .characters import CharacterRegistry, render_family_list
 from .i18n import Lang, resolve, t
 from .models import Mode, new_job
 from .ports.queue import QueuePort
@@ -29,9 +30,15 @@ IGNORED = "ignored"  # not for us
 
 
 class Dispatcher:
-    def __init__(self, telegram: TelegramClient, queue: QueuePort) -> None:
+    def __init__(
+        self,
+        telegram: TelegramClient,
+        queue: QueuePort,
+        registry: CharacterRegistry | None = None,
+    ) -> None:
         self._telegram = telegram
         self._queue = queue
+        self._registry = registry or CharacterRegistry()
 
     async def handle_update(self, update: dict) -> str:
         chat_id, raw = commands.extract_message(update)
@@ -49,6 +56,12 @@ class Dispatcher:
             await self._telegram.send_text(chat_id, t(lang, "menu"))
             return HANDLED
 
+        # Queries are checked first so a read-only command can never become a
+        # generation job.
+        if commands.parse_query(text) == commands.FAMILY_QUERY:
+            await self._telegram.send_text(chat_id, self._family_list(lang))
+            return HANDLED
+
         parsed = commands.parse_text(text)
         if parsed is None:
             # An unrecognised /command — /start included.
@@ -56,6 +69,16 @@ class Dispatcher:
             return HANDLED
 
         return await self._enqueue(chat_id, parsed.mode, parsed.args, lang)
+
+    def _family_list(self, lang: Lang) -> str:
+        """Names only. Appearance and traits are prompt material — echoing a
+        child's physical description back into a chat is not something to do
+        casually, and the chat log is one more place it would then live."""
+        names = render_family_list(self._registry, lang.value)
+        if not names:
+            return t(lang, "family_empty")
+        listed = "\n".join(f"• {name}" for name in names)
+        return f"{t(lang, 'family_list_header')}\n{listed}"
 
     async def _enqueue(self, chat_id: int, mode: Mode, args: str, lang: Lang) -> str:
         prompt = compose_request(mode, args)

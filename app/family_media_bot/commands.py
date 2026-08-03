@@ -21,6 +21,15 @@ _COMMAND_MODES = {
 
 _LANGUAGE_PREFIX = "lang:"
 
+# Queries answer from local state and enqueue nothing. `Mode` deliberately does
+# not grow a member for these: it is the generation mode carried on the Job, and
+# a listing is not a kind of story.
+FAMILY_QUERY = "family"
+
+_QUERY_COMMANDS = {
+    "/family": FAMILY_QUERY,
+}
+
 
 @dataclass
 class ParsedCommand:
@@ -61,6 +70,15 @@ def split_language_token(text: str) -> tuple[str, str]:
 
     token, _, rest = stripped.partition(" ")
     return token[len(_LANGUAGE_PREFIX) :].lower(), rest.strip()
+
+
+def parse_query(text: str) -> str | None:
+    """Return a query name for a read-only command, else None.
+
+    Checked before `parse_text` so a query never becomes a generation job.
+    """
+    head, _, _ = text.strip().partition(" ")
+    return _QUERY_COMMANDS.get(head.split("@", 1)[0].lower())
 
 
 def parse_text(text: str) -> ParsedCommand | None:

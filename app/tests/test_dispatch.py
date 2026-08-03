@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 from family_media_bot import commands
+from family_media_bot.characters import CharacterRegistry, load_registry
 from family_media_bot.dispatch import ACCEPTED, HANDLED, IGNORED, Dispatcher
 from family_media_bot.i18n import Lang, t
 from family_media_bot.models import Mode
@@ -59,11 +61,16 @@ class LanguageTokenTests(unittest.TestCase):
         )
 
 
+REGISTRY = load_registry(
+    str(Path(__file__).parent / "fixtures" / "characters_valid.yaml"), required=True
+)
+
+
 class DispatcherTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.telegram = AsyncMock()
         self.queue = AsyncMock()
-        self.dispatcher = Dispatcher(self.telegram, self.queue)
+        self.dispatcher = Dispatcher(self.telegram, self.queue, REGISTRY)
 
     async def _enqueued(self):
         self.queue.enqueue.assert_awaited_once()
@@ -127,6 +134,37 @@ class DispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         self.queue.enqueue.assert_not_awaited()
         self.telegram.send_text.assert_not_awaited()
+
+    async def test_family_list_answers_without_enqueueing(self) -> None:
+        # A listing is a query, not a kind of story.
+        result = await self.dispatcher.handle_update(update("/family"))
+
+        self.assertEqual(result, HANDLED)
+        self.queue.enqueue.assert_not_awaited()
+
+    async def test_family_list_uses_the_requested_language(self) -> None:
+        await self.dispatcher.handle_update(update("lang:ru /family"))
+
+        sent = self.telegram.send_text.await_args.args[1]
+        self.assertIn("Мила", sent)
+        self.assertIn(t(Lang.RU, "family_list_header"), sent)
+
+    async def test_family_list_never_reveals_appearance(self) -> None:
+        # Appearance is prompt material. A chat log is one more place a child's
+        # physical description would otherwise come to live.
+        await self.dispatcher.handle_update(update("lang:en /family"))
+
+        sent = self.telegram.send_text.await_args.args[1]
+        self.assertIn("Mila", sent)
+        self.assertNotIn("freckles", sent)
+        self.assertNotIn("loves animals", sent)
+
+    async def test_family_list_on_an_empty_registry_explains_itself(self) -> None:
+        dispatcher = Dispatcher(self.telegram, self.queue, CharacterRegistry())
+
+        await dispatcher.handle_update(update("lang:en /family"))
+
+        self.telegram.send_text.assert_awaited_once_with(123, t(Lang.EN, "family_empty"))
 
     async def test_no_character_text_travels_on_the_queue(self) -> None:
         # The cast is deployment configuration resolved in the worker, so a job
