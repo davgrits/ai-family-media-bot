@@ -1,27 +1,25 @@
 # AI Family Media Bot
 
-A portfolio DevOps project: a Telegram bot that turns a family's request into a
-short, age-appropriate **bedtime story** plus **one illustration**, running on
-**GCP (GKE + Vertex AI)** — and end-to-end on a laptop with no cloud account.
+A Telegram bot that turns a family's request into a short, age-appropriate
+**bedtime story** plus **one illustration** — starring the family's own
+characters, in English, Russian, or Hebrew.
 
-Cloud services stay behind ports and adapters, so the same pipeline runs against
-local fakes or real GCP. The frozen application contract is
+Runs on **GCP (GKE + Vertex AI)**, and end-to-end on a laptop with no cloud
+account. Cloud services sit behind ports and adapters; the frozen contract is
 [`docs/api-contract.md`](docs/api-contract.md).
 
 ---
 
 ## Architecture
 
-Media generation is slow (seconds–minutes), so it cannot run inline with
-Telegram intake. Whether an update arrives through long polling or `/webhook`,
-the web tier only **enqueues** it; a **worker** performs generation
-asynchronously.
+Generation takes ~14 seconds, so it cannot run inline with Telegram intake. Both
+entry points — long polling and `/webhook` — only **enqueue**; a worker generates.
 
 ```mermaid
 flowchart LR
     TG["Telegram Bot API"]
 
-    subgraph GKE["GKE · one zonal cluster, private nodes"]
+    subgraph GKE["GKE · one zonal cluster, private nodes, one node pool"]
         WEB["web<br/>always warm<br/>enqueue only"]
         WRK["worker<br/>always warm<br/>generation"]
     end
@@ -41,15 +39,11 @@ flowchart LR
     WI -.-> WRK
 ```
 
-Two tiers, separated because their failure and latency profiles differ: intake
-must answer Telegram in milliseconds, generation takes ~14 seconds.
+Two tiers because their latency profiles differ: intake answers Telegram in
+milliseconds, generation takes seconds. Both stay warm.
 
-- **web tier** — receives Telegram updates, enqueues, serves `/healthz`,
-  `/readyz`, `/metrics`.
-- **worker tier** — consumes the subscription and runs the pipeline.
-
-Every cloud integration sits behind an interface, so the same application logic
-runs with local fakes or against real services:
+Every cloud integration sits behind an interface, selected by environment
+variable and validated at startup:
 
 | Concern | Interface | Local | GCP |
 |---|---|---|---|
@@ -58,68 +52,73 @@ runs with local fakes or against real services:
 | Image | `ImageProvider` | `FakeImageProvider` | `VertexImageProvider` |
 | Storage | `StoragePort` | `LocalDirStorage` | `GcsStorage` |
 
-Adapters are selected by environment variable, validated at startup — an
-unrecognised value fails fast rather than being ignored.
-
 ### Design decisions
 
-| Decision | Why | Trade-off accepted |
+| Decision | Why | Trade-off |
 |---|---|---|
-| **Ports and adapters for cloud services** | Queue, story, image, and storage implementations change without touching the pipeline | More interfaces to maintain |
-| **Keyless workload identity** | Pods exchange a Kubernetes service-account token for Google credentials. No service-account key file exists anywhere in this project | More IAM plumbing up front |
-| **Two warm tiers, not scale-to-zero** | Activating a worker from zero on Pub/Sub backlog measured **4m43s**: the backlog metric samples on a ~60s interval and can gap for minutes. On a bot a child is waiting for, that latency *is* the product | An idle worker costs ~₪90/month |
-| **One Pub/Sub stream per worker process** | Streaming pull with outstanding messages capped at worker concurrency; callbacks hand off to asyncio and ack only after the pipeline succeeds | The adapter is more intricate than a unary pull |
-| **Adapters never fabricate success** | A placeholder image, a truncated story, or a `$0` cost is a failure disguised as a success — it acks, logs `job completed`, and nobody notices. Adapters raise and let the queue retry | A transient provider error costs a retry instead of returning something |
-| **Character registry in English, in git** | Image models are trained overwhelmingly on English captions, so an English appearance string is both better and more *repeatable* than a translated one | Characters are edited by pull request, not from chat |
-| **Private storage with expiry** | Generated media is private and reproducible, so it expires automatically | Old stories cannot be re-sent indefinitely |
-| **Immutable deployment tags** | The image tag is supplied by CI, never committed, so a release always traces to a commit | Every release needs a fresh tag |
-| **No real photos of children** | Characters are text descriptions only | Illustrations are intentionally less personalised |
+| **Two warm tiers, not scale-to-zero** | Activating a worker from zero on Pub/Sub backlog measured **4m43s** — the backlog metric samples on a ~60s interval and can gap for minutes. On a bot a child waits for, that latency *is* the product | An idle worker costs ~₪90/month |
+| **Keyless workload identity** | Pods exchange a Kubernetes token for Google credentials. No service-account key file exists in this project | More IAM plumbing up front |
+| **Character registry in git, in English** | Image models are trained overwhelmingly on English captions, so an English appearance string is more *repeatable* — which is what keeps the same child recognisable across illustrations | Characters are edited by pull request, not from chat |
+| **Adapters never fabricate success** | A placeholder image, a truncated story, or a `$0` cost is a failure disguised as success: it acks, logs `job completed`, and nobody notices. Adapters raise; the queue retries | A transient error costs a retry instead of returning something |
+| **Everything time-bounded** | 40s per model call, 90s per job, 60s Pub/Sub lease. A hung call would otherwise block the only worker indefinitely | A slow-but-valid generation can be cut off |
+| **Image tag supplied at deploy, never committed** | A release always traces to a commit and cannot drift from what is running | Every release needs a fresh tag |
+| **No real photos of children** | Characters are text descriptions only | Illustrations are less personalised by design |
 
-### Endpoints
+---
 
-| Method | Path       | Purpose |
-|--------|------------|---------|
-| GET    | `/healthz` | Liveness. **Does not** call cloud providers — a cloud outage must not trigger a restart loop. |
-| GET    | `/readyz`  | Readiness — checks each swap-point dep; `503` if any is unready. |
-| GET    | `/metrics` | Prometheus scrape (incl. per-job cost). |
-| POST   | `/webhook` | Telegram update → validate → enqueue → `200`. |
+## Bot commands
 
-### Bot commands
+| Command | Meaning |
+|---|---|
+| `/fairytale [extra wishes]` | A story starring the family's registered characters |
+| `/custom <text>` | Free-text scene — or just type the text with no command |
+| `/surprise` | A random story, no questions asked |
+| `/family` | Lists who stars in the stories (names only) |
+| `/start` | How to use the bot |
 
-| Command          | Mode        | Meaning |
-|------------------|-------------|---------|
-| `/fairytale`     | `fairytale` | A tale starring the family's registered characters. |
-| `/custom <text>` | `custom`    | Free-text scene prompt. |
-| `/surprise`      | `random`    | Random scenario. |
+**Language** is a message prefix, not a command: `lang:en`, `lang:ru`, `lang:he`.
+For example `lang:en /fairytale`. Without it the bot uses your Telegram client's
+language, falling back to Russian. The choice is deliberately not remembered —
+that would mean per-chat state.
+
+Only `/fairytale` uses the cast. `/custom` and `/surprise` produce
+characterless stories.
+
+## HTTP endpoints
+
+| Path | Purpose |
+|---|---|
+| `GET /healthz` | Liveness. Makes **no** cloud call — an outage must not cause a restart loop |
+| `GET /livez` | Worker liveness: is this process actually attached to the queue? The stream can die while the pod stays Ready |
+| `GET /readyz` | Readiness — checks the configured dependencies. `503` if any is unready |
+| `GET /metrics` | Prometheus scrape |
+| `POST /webhook` | Telegram update → validate → enqueue → `200` |
 
 ---
 
 ## Repo layout
 
 ```
-app/             the Python service — local and GCP adapters
-deploy/charts/   the Helm application chart
-deploy/values/   deployment inputs (prod.yaml)
-infra/gcp/       Terraform — VPC, GKE, Pub/Sub, GCS, Artifact Registry, Workload Identity
-docs/            the frozen API & job contract, design notes, runbook
-observability/   placeholder for planned dashboards and collector config
-```
-
-`app/` internals:
-
-```
-family_media_bot/
-  app.py          FastAPI app + endpoints + lifespan (starts the worker)
-  worker.py       background queue consumer
-  pipeline.py     per-job flow: story → image prompt → image → store → send
-  factory.py      composition root — picks an adapter per port from env
-  config.py       env-driven settings        models.py    frozen Job shape
-  prompts.py      prompt composition + bedtime guardrails
-  commands.py     Telegram update → command   telegram.py  Bot API client
-  logging_setup.py  structured JSON logs      telemetry.py  OpenTelemetry (OTLP)
-  metrics.py      Prometheus metrics
-  ports/          QueuePort, StoryProvider, ImageProvider, StoragePort
-  adapters/       local and GCP implementations
+app/                     the Python service
+  family_media_bot/
+    app.py               FastAPI app, endpoints, lifespan
+    dispatch.py          the one update handler, shared by webhook and poller
+    worker.py            queue consumer with a drain window
+    pipeline.py          story → image prompt → image → store → send
+    characters.py        the cast: schema, loader, validation
+    prompts.py           per-language system prompts + prompt composition
+    i18n.py              what the bot says in chat (en/ru/he)
+    commands.py          parsing — pure, no I/O
+    factory.py           composition root: one adapter per port
+    config.py            env settings      models.py  frozen Job shape
+    ports/               QueuePort, StoryProvider, ImageProvider, StoragePort
+    adapters/            local fakes and GCP implementations
+  tests/                 unittest suites
+deploy/charts/           the Helm chart
+  .../files/characters.yaml   the family, mounted as a ConfigMap
+deploy/values/prod.yaml  deployment inputs (no image tag — CI supplies it)
+infra/gcp/               Terraform: VPC, GKE, Pub/Sub, GCS, Artifact Registry, IAM
+docs/                    contract, runbook, design notes
 ```
 
 ---
@@ -129,99 +128,76 @@ family_media_bot/
 Requires Python 3.11+.
 
 ```bash
-cp .env.example .env          # defaults already select fake/in-memory/local
-
-make install                  # creates app/.venv and installs deps
-make run                      # serves on http://localhost:8080
+cp .env.example .env
+make install
+make run        # http://localhost:8080, fake providers, the real cast
 ```
 
-In another shell, exercise the full flow:
+In another shell, `make smoke` exercises the full flow. Watch for `job enqueued`
+→ `story done` → `image done` → `saved` → `job completed`, and find the PNG at
+`app/var/media/generated/<job_id>.png`. With no token set, the send step logs
+`telegram disabled — would send story+image`.
 
-```bash
-make smoke
-```
+Other targets: `make test`, `make lint`, `make fmt`, `make helm-lint`,
+`make docker-build`.
 
-Then watch the server logs for `job enqueued` → `job started` → `story done` →
-`image done` → `saved` → `job completed`, and find the generated PNG at
-`app/var/media/generated/<job_id>.png`. With no Telegram token set, the send step
-logs `telegram disabled — would send story+image` instead of calling the Bot API.
+### Against real GCP
 
-Scrape metrics (including per-job cost) at `http://localhost:8080/metrics`.
+Put your `GCP_PROJECT_ID`, `GCS_BUCKET`, and `TELEGRAM_BOT_TOKEN` in `app/.env`,
+set the providers to `vertex`/`gcs`, and authenticate with
+`gcloud auth application-default login`. Then `make demo`.
 
-### Local demo against real GCP
-
-Create `app/.env` (gitignored) with `STORY_PROVIDER=vertex`,
-`IMAGE_PROVIDER=vertex`, `STORAGE=gcs`, your `GCP_PROJECT_ID`, `GCS_BUCKET`, and
-a `TELEGRAM_BOT_TOKEN` from [@BotFather](https://t.me/BotFather). Credentials come
-from `gcloud auth application-default login`.
-
-```bash
-make demo
-```
-
-Keep `QUEUE=inmemory` for this: `RUN_MODE=all` means one process both receives
-and generates, so it never competes with the deployed worker for the same
-Pub/Sub messages. Run only **one** polling instance per bot token — Telegram
-returns 409 otherwise.
-
-### Run in Docker
-
-```bash
-make docker-build
-make docker-run               # maps :8080, reads ./.env
-```
+Keep `QUEUE=inmemory` for this: one process both receives and generates, so it
+never competes with the deployed worker for the same Pub/Sub messages. Run only
+**one** poller per bot token — Telegram returns 409 otherwise.
 
 ---
 
 ## Deployment
 
-The live release is installed on GKE from the Helm chart with
-[`deploy/values/prod.yaml`](deploy/values/prod.yaml):
+```bash
+helm upgrade --install family-media-bot deploy/charts/family-media-bot \
+  --namespace app -f deploy/values/prod.yaml \
+  --set-string image.tag='<git-sha>' --rollback-on-failure --wait --timeout 5m
+```
 
-- both tiers stay warm; the web tier polls Telegram;
-- Pub/Sub carries generation jobs, with a DLQ after 5 delivery attempts;
-- Vertex AI uses `gemini-3.5-flash` for stories and `gemini-2.5-flash-image` for
-  illustrations;
-- GCS stores private generated media;
-- GKE Workload Identity supplies keyless access to Google Cloud APIs.
+`--rollback-on-failure` is Helm 4's replacement for `--atomic`. Editing
+`files/characters.yaml` and upgrading rolls both tiers via a checksum annotation
+— no image rebuild. Operational detail is in the [runbook](docs/runbook.md).
 
-The image tag is supplied at upgrade time rather than committed, so a release is
-always traceable to a commit. Operational commands are in the
-[runbook](docs/runbook.md).
+Terraform owns the cloud resources; Helm owns the Kubernetes objects. The
+Telegram token is created imperatively as a Secret, so its value never enters a
+values file or the Helm release.
+
+Running cost is roughly **₪220–280/month**, dominated by the single always-on
+node. The GKE control plane is free for one zonal cluster.
 
 ## Configuration
 
 Every setting is an environment variable with a safe local default — see
-[`.env.example`](.env.example) for the annotated list. The ones you'll touch
-most:
+[`.env.example`](.env.example). The ones you'll touch:
 
-- `STORY_PROVIDER` / `IMAGE_PROVIDER` — `fake` or `vertex`.
-- `STORAGE` — `local` or `gcs`; `QUEUE` — `inmemory` or `pubsub`.
-- `RUN_MODE` — `all` (default; web + in-process worker), or `web` / `worker` for
-  the prod tier split, which uses Pub/Sub as the shared queue.
-- `TELEGRAM_BOT_TOKEN` — leave blank to log sends instead of calling Telegram.
-- `OTEL_EXPORTER_OTLP_ENDPOINT` — set to export traces; unset = safe no-op.
-
-## Infrastructure
-
-[`infra/gcp/`](infra/gcp/) is the single Terraform root: a custom VPC with
-private nodes and Cloud NAT, a zonal GKE cluster, Pub/Sub jobs queue and DLQ, a
-private GCS media bucket with lifecycle expiry, Artifact Registry, and
-least-privilege service accounts bound through Workload Identity.
-
-Terraform owns cloud resources; it does not own Kubernetes workloads. The
-[Helm chart](deploy/charts/family-media-bot/) owns the web and worker
-Deployments, configuration, and service account. `make helm-lint` renders and
-schema-validates the release.
+- `STORY_PROVIDER` / `IMAGE_PROVIDER` — `fake` or `vertex`
+- `STORAGE` — `local` or `gcs`; `QUEUE` — `inmemory` or `pubsub`
+- `RUN_MODE` — `all` (web + in-process worker), or `web` / `worker` for the split
+- `CHARACTERS_FILE` — path to the cast; `CHARACTERS_REQUIRED=true` makes an
+  absent registry fatal at startup rather than telling stories about nobody
+- `TELEGRAM_BOT_TOKEN` — blank logs sends instead of calling Telegram
+- `OTEL_EXPORTER_OTLP_ENDPOINT` — unset is a safe no-op
 
 ## Observability
 
-- **Logs** — structured JSON on stdout, enriched with `extra` fields and OTel
-  `trace_id`/`span_id` when a trace is active. No personal data: no `chat_id`, no
-  message text, no character names.
-- **Metrics** — Prometheus at `/metrics`, including `fmb_job_cost_usd` (the
-  contract's per-job FinOps metric — text call plus image call, counting
-  reasoning tokens, which are billed but excluded from the visible output count),
-  job duration, queue wait, and enqueued/processed counts.
-- **Traces** — OpenTelemetry SDK with an OTLP/HTTP exporter; the per-job pipeline
-  runs inside a `job.process` span. No-op when no endpoint is configured.
+- **Logs** — structured JSON, with OTel `trace_id`/`span_id` when a trace is
+  active. No personal data: no `chat_id`, no message text, no character names.
+- **Metrics** — Prometheus at `/metrics`: `fmb_jobs_processed_total`,
+  `fmb_job_processing_seconds`, `fmb_queue_wait_seconds`, `fmb_job_cost_usd`
+  (text + image, including reasoning tokens, which are billed but excluded from
+  the visible output count), `fmb_illustration_hint_missing`.
+- **Traces** — OTLP/HTTP exporter; each job runs inside a `job.process` span.
+
+> **Not yet collected.** Nothing scrapes `/metrics` in the cluster — there is no
+> `PodMonitoring` and only system-component monitoring is enabled. So
+> `fmb_queue_wait_seconds` measured the 4m43s cold start from day one and nobody
+> could see it. `fmb_queue_depth` is worse than missing: Pub/Sub exposes backlog
+> through Cloud Monitoring, not the subscriber API, so it always reports `0`.
+> Both are tracked in [ROADMAP.md](ROADMAP.md).
