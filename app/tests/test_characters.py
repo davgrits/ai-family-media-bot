@@ -177,6 +177,34 @@ class ValidationTests(unittest.TestCase):
         self.assertIn("characters[0].appearance", message)
 
 
+class ShippedRegistryTests(unittest.TestCase):
+    """Guards the registry that actually deploys.
+
+    Without this, a bad edit to characters.yaml is only discovered when the pod
+    fails to start — and the loader is deliberately fatal, so that means a failed
+    rollout rather than a test failure.
+    """
+
+    PATH = (
+        Path(__file__).parents[2]
+        / "deploy"
+        / "charts"
+        / "family-media-bot"
+        / "files"
+        / "characters.yaml"
+    )
+
+    def test_the_deployed_registry_is_valid(self) -> None:
+        registry = load_registry(str(self.PATH), required=True)
+
+        self.assertFalse(registry.is_empty())
+        # Every character must be nameable in all three story languages, or
+        # /family list silently falls back to English for that person.
+        for character in registry.cast():
+            with self.subTest(character=character.id):
+                self.assertEqual(sorted(character.names), ["en", "he", "ru"])
+
+
 class DisplayNameTests(unittest.TestCase):
     def test_names_fall_back_from_language_to_english_to_id(self) -> None:
         registry = load_registry(VALID)

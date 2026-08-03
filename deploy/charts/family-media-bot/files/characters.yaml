@@ -1,0 +1,69 @@
+# The family's story cast.
+#
+# Lives inside the chart because Helm's `.Files.Get` cannot read outside the
+# chart directory. Rendered into a ConfigMap and mounted read-only; editing this
+# file and running `helm upgrade` rolls both deployments, with no image rebuild.
+#
+# Edited by pull request. There is no write path from Telegram — a bot cannot
+# commit to git, and a runtime overlay would mean per-chat state for a registry
+# that changes a few times a year.
+#
+# `appearance` and `traits` are English on purpose, and this is enforced. Image
+# models are trained overwhelmingly on English captions, so an English string is
+# both better and — the part that matters — more *repeatable*. `appearance` is
+# reused verbatim in every illustration prompt: it is what makes the same person
+# look like the same person from one picture to the next. Keep it concrete and
+# stable; prefer signature clothing and distinguishing features over mood.
+#
+# Text descriptions only. Never a photograph of a real child.
+#
+# The royal roles are deliberately inverted: David is the queen, Basia the king.
+version: 1
+characters:
+  - id: david
+    appearance: "36-year-old man with medium olive skin, dark brown eyes, thick black curly hair, full black beard, strong eyebrows, and a small silver eyebrow piercing; wears a midnight-blue queen's robe, silver crown, and moon-patterned sleep cap"
+    traits: "Warm, funny, affectionate, endlessly sleepy, and unexpectedly brave; the forever-sleeping queen of the family"
+    names:
+      en: David
+      ru: Давид
+      he: דוד
+
+  - id: basia
+    appearance: "36-year-old woman with fair skin, blue eyes, and straight light-blonde hair tied back; wears an emerald-green velvet king's coat, a golden crown, and a white shirt"
+    traits: "Wise, beautiful, calm, caring, and practical; the family king who always finds a clever solution"
+    names:
+      en: Basia
+      ru: Бася
+      he: בסיה
+
+  - id: ellie
+    appearance: "13-year-old girl with a slender build, brown eyes, long tightly curled brown hair tied back, and clear-framed glasses; wears a deep-purple wizard's cloak, silver star brooch, and leather spellbook"
+    traits: "Wise, thoughtful, observant, imaginative, and quietly courageous; a gifted young wizard who loves learning"
+    names:
+      en: Ellie
+      ru: Элли
+      he: אלי
+
+  - id: bulochka
+    appearance: "10-year-old girl with warm fair skin, brown eyes, a soft round face, and curly medium-brown hair tied back; wears a red pointed cap, teal dwarf's tunic, striped trousers, and a broad brown belt"
+    traits: "Loyal, cheerful, resourceful, energetic, and kind; the wizard Ellie's faithful dwarf assistant"
+    names:
+      en: Bulochka
+      ru: Булочка
+      he: "בולוצ'קה"
+
+  - id: yuki
+    appearance: "8-year-old Scottish Fold cat with a very round face, small folded ears, amber eyes, plush silver-gray tabby fur, dark stripes, a pale belly, and a thick tail; wears a violet collar with a silver moon charm"
+    traits: "Dignified, sleepy, stubborn, observant, secretly affectionate, and convinced that she rules the entire castle"
+    names:
+      en: Yuki
+      ru: Юки
+      he: יוקי
+
+  - id: lumi
+    appearance: "1-year-old White Swiss Shepherd dog with a bright white coat, upright pointed ears, dark eyes, a black nose, long legs, and a large fluffy tail; wears a distinctive bright-pink harness"
+    traits: "Energetic, playful, loyal, curious, loving, and protective; the young guardian of the royal family"
+    names:
+      en: Lumi
+      ru: Люми
+      he: לומי

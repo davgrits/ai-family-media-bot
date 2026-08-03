@@ -5,6 +5,10 @@ IMAGE   := family-media-bot:dev
 PORT    := 8080
 CHART   := deploy/charts/family-media-bot
 VALUES  := deploy/values/prod.yaml
+# Relative to $(APP_DIR), because the run targets cd there. Exported so a local
+# run gets the real cast with no configuration at all; in the cluster this comes
+# from the ConfigMap mount instead.
+CHARACTERS := ../$(CHART)/files/characters.yaml
 
 help:
 	@echo "Targets:"
@@ -52,13 +56,14 @@ helm-lint:
 		-f $(VALUES) --set image.tag=ci >/dev/null
 
 run:
-	cd $(APP_DIR) && ./.venv/bin/python -m family_media_bot
+	cd $(APP_DIR) && CHARACTERS_FILE=$(CHARACTERS) ./.venv/bin/python -m family_media_bot
 
 # One command for the live demo. Config comes from app/.env (gitignored): real
 # Vertex AI + GCS, Telegram long polling. See README "Local demo".
 demo:
 	@test -f $(APP_DIR)/.env || { echo "Missing app/.env — see README section 'Local demo'"; exit 1; }
-	cd $(APP_DIR) && ./.venv/bin/python -m family_media_bot
+	cd $(APP_DIR) && CHARACTERS_FILE=$(CHARACTERS) CHARACTERS_REQUIRED=true \
+		./.venv/bin/python -m family_media_bot
 
 docker-build:
 	docker build -t $(IMAGE) $(APP_DIR)
