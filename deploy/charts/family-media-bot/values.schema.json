@@ -3,7 +3,7 @@
   "title": "family-media-bot values",
   "description": "Validated at install/upgrade time. The point of this schema is to turn a misconfigured release into a helm error rather than a CrashLoopBackOff.",
   "type": "object",
-  "required": ["image", "app", "serviceAccount", "gcp", "web", "worker"],
+  "required": ["image", "app", "serviceAccount", "registry", "gcp", "web", "worker"],
   "additionalProperties": false,
   "properties": {
     "image": {
@@ -65,6 +65,22 @@
           "type": "object",
           "description": "Carries iam.gke.io/gcp-service-account for Workload Identity.",
           "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "registry": {
+      "type": "object",
+      "required": ["mountPath", "required"],
+      "additionalProperties": false,
+      "properties": {
+        "mountPath": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "Absolute path where the character ConfigMap is mounted."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether an absent registry is fatal at startup."
         }
       }
     },

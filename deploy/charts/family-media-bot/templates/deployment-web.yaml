@@ -16,6 +16,8 @@ spec:
       app.kubernetes.io/component: web
   template:
     metadata:
+      annotations:
+        {{- include "family-media-bot.configChecksums" . | nindent 8 }}
       labels:
         {{- include "family-media-bot.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/managed-by: {{ .Release.Service }}
@@ -23,6 +25,8 @@ spec:
         app.kubernetes.io/component: web
     spec:
       serviceAccountName: {{ include "family-media-bot.name" . }}
+      volumes:
+        {{- include "family-media-bot.registryVolume" . | nindent 8 }}
       containers:
         - name: web
           image: "{{ required "image.repository is required" .Values.image.repository }}:{{ required "image.tag is required" .Values.image.tag }}"
@@ -33,11 +37,14 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "family-media-bot.name" . }}-config
+          volumeMounts:
+            {{- include "family-media-bot.registryMount" . | nindent 12 }}
           env:
             - name: RUN_MODE
               value: web
             - name: TELEGRAM_POLLING
               value: "true"
+            {{- include "family-media-bot.registryEnv" . | nindent 12 }}
             - name: TELEGRAM_BOT_TOKEN
               valueFrom:
                 secretKeyRef:

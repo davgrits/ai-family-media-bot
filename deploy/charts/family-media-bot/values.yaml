@@ -22,6 +22,14 @@ app:
 serviceAccount:
   annotations: {}
 
+registry:
+  # Where the character ConfigMap is mounted. The app reads
+  # <mountPath>/characters.yaml at startup.
+  mountPath: /etc/family-media-bot/registry
+  # Production sets this: starting without a cast means telling stories about
+  # nobody, which should fail the rollout rather than ship quietly.
+  required: true
+
 web:
   replicaCount: 1
   resources:

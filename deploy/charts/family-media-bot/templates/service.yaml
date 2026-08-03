@@ -1,0 +1,25 @@
+# The chart had no Service at all, which is why `helm test` could not be built and
+# why nothing could scrape /metrics.
+#
+# ClusterIP, not LoadBalancer: Telegram intake is outbound long polling, so
+# nothing outside the cluster needs to reach the web tier. Exposing it publicly
+# would add an attack surface for zero functionality — /webhook exists as an
+# alternative intake path but is not the one in use.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "family-media-bot.name" . }}-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "family-media-bot.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "family-media-bot.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: web

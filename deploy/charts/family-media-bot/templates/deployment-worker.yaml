@@ -9,12 +9,26 @@ metadata:
 spec:
   # One warm worker, deliberately. See values.yaml for the measurement behind it.
   replicas: {{ .Values.worker.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Surge before terminating, so a registry edit does not leave the queue
+      # unattended. Pub/Sub distributes between the two overlapping workers
+      # safely, and the outgoing pod's in-flight job is nacked on shutdown.
+      #
+      # This is why the node pool must be sized for two workers, not one: a
+      # surge pod that cannot be scheduled leaves the rollout stuck and
+      # --rollback-on-failure reverting a release that was actually fine.
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       {{- include "family-media-bot.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: worker
   template:
     metadata:
+      annotations:
+        {{- include "family-media-bot.configChecksums" . | nindent 8 }}
       labels:
         {{- include "family-media-bot.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/managed-by: {{ .Release.Service }}
@@ -23,6 +37,8 @@ spec:
     spec:
       serviceAccountName: {{ include "family-media-bot.name" . }}
       terminationGracePeriodSeconds: 120
+      volumes:
+        {{- include "family-media-bot.registryVolume" . | nindent 8 }}
       containers:
         - name: worker
           image: "{{ required "image.repository is required" .Values.image.repository }}:{{ required "image.tag is required" .Values.image.tag }}"
@@ -33,11 +49,14 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "family-media-bot.name" . }}-config
+          volumeMounts:
+            {{- include "family-media-bot.registryMount" . | nindent 12 }}
           env:
             - name: RUN_MODE
               value: worker
             - name: WORKER_CONCURRENCY
               value: {{ .Values.app.workerConcurrency | quote }}
+            {{- include "family-media-bot.registryEnv" . | nindent 12 }}
             - name: TELEGRAM_BOT_TOKEN
               valueFrom:
                 secretKeyRef:
