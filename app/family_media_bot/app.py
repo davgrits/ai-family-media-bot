@@ -106,6 +106,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Liveness only. MUST NOT check cloud dependencies (avoids restart loops).
         return {"status": "ok"}
 
+    @app.get("/livez")
+    async def livez():
+        # Liveness for the worker tier. /healthz proves the process is serving
+        # HTTP, which the worker could do while consuming nothing at all: the
+        # Pub/Sub stream can terminate permanently and leave the pod Running,
+        # Ready and Live with zero restarts.
+        #
+        # This reads a local boolean and makes no network call, so contract #3
+        # still holds — a Google outage must not become a restart loop.
+        consuming = app.state.queue.is_healthy()
+        if consuming:
+            return {"status": "ok", "consuming": True}
+        return JSONResponse(
+            {"status": "not_consuming", "consuming": False},
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
     @app.get("/metrics")
     async def metrics_endpoint():
         # Prometheus scrape. A plain route (not a mount) so `/metrics` with no

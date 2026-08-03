@@ -32,6 +32,17 @@ class QueuePort(abc.ABC):
     async def close(self) -> None:
         """Stop consumers and release provider resources. Must be idempotent."""
 
+    def is_healthy(self) -> bool:
+        """Whether this process is actually able to consume.
+
+        Synchronous and local by contract — this backs the liveness probe, so it
+        must never make a network call. A liveness probe that talks to the cloud
+        turns a cloud outage into a restart loop.
+
+        Adapters that cannot silently stop consuming return True.
+        """
+        return True
+
     @abc.abstractmethod
     async def enqueue(self, job: Job) -> None:
         """Add a job to the queue. Called from the webhook — must be fast."""

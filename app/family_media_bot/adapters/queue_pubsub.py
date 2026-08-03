@@ -29,6 +29,13 @@ logger = logging.getLogger(__name__)
 
 _STREAM_SHUTDOWN_TIMEOUT_SECONDS = 10.0
 
+# Must stay under the subscription's ack deadline, or a lease outlives the
+# deadline and Pub/Sub redelivers work that is still being processed.
+_MAX_LEASE_SECONDS = 60
+
+_INITIAL_RECONNECT_BACKOFF_SECONDS = 1.0
+_MAX_RECONNECT_BACKOFF_SECONDS = 30.0
+
 
 class PubSubQueue(QueuePort):
     def __init__(self, project_id: str, topic_name: str, subscription_name: str) -> None:
@@ -55,6 +62,12 @@ class PubSubQueue(QueuePort):
         self._callback_lock = threading.Lock()
         self._closing = False
         self._closed = False
+        # Whether the data-plane stream is believed alive. Read by /livez, which
+        # is why it is a plain local boolean and not a cloud call: a liveness
+        # probe that talks to Google turns a Google outage into a restart loop.
+        self._stream_alive = False
+        self._concurrency = 1
+        self._supervisor: asyncio.Task | None = None
 
     @staticmethod
     def _resource_path(project_id: str, resource_type: str, name: str) -> str:
@@ -70,20 +83,71 @@ class PubSubQueue(QueuePort):
                 return
 
             max_messages = max(1, concurrency)
+            self._concurrency = max_messages
             self._loop = asyncio.get_running_loop()
             self._deliveries = asyncio.Queue(maxsize=max_messages)
-            flow_control = pubsub_v1.types.FlowControl(max_messages=max_messages)
-            self._streaming_future = self._subscriber.subscribe(
-                self._subscription_path,
-                callback=self._on_message,
-                flow_control=flow_control,
-                await_callbacks_on_shutdown=True,
-            )
-            self._streaming_future.add_done_callback(self._on_stream_done)
-            logger.info(
-                "Pub/Sub streaming subscriber started",
-                extra={"max_outstanding_messages": max_messages},
-            )
+            self._subscribe(max_messages)
+
+    def _subscribe(self, max_messages: int) -> None:
+        """Open the streaming pull. Called on start and on every reconnect."""
+        flow_control = pubsub_v1.types.FlowControl(
+            max_messages=max_messages,
+            # Defaults to 3600s, against a subscription ack deadline of 60s. A
+            # hung model call would otherwise hold a lease for an hour while the
+            # only worker sat blocked on it.
+            max_lease_duration=_MAX_LEASE_SECONDS,
+        )
+        self._streaming_future = self._subscriber.subscribe(
+            self._subscription_path,
+            callback=self._on_message,
+            flow_control=flow_control,
+            await_callbacks_on_shutdown=True,
+        )
+        self._streaming_future.add_done_callback(self._on_stream_done)
+        self._stream_alive = True
+        logger.info(
+            "Pub/Sub streaming subscriber started",
+            extra={
+                "max_outstanding_messages": max_messages,
+                "max_lease_seconds": _MAX_LEASE_SECONDS,
+            },
+        )
+
+    def is_healthy(self) -> bool:
+        """Whether this process is actually consuming.
+
+        The stream can terminate permanently — google-cloud-pubsub treats
+        Unauthenticated, PermissionDenied, NotFound, Cancelled *and any
+        non-GoogleAPICallError exception* as terminal, so a Workload Identity
+        token-refresh blip is enough. When that happened the pod stayed Running,
+        Ready and Live with zero restarts, consuming nothing, indefinitely.
+
+        Under the old autoscaler this self-healed by accident: the cooldown scaled
+        to zero and the next backlog spike built a fresh pod. A fixed replica count
+        removes that accident, which is why this signal has to be explicit.
+        """
+        return self._stream_alive and not self._closed
+
+    async def _reconnect_after(self, delay: float) -> None:
+        """Reopen the stream, backing off, until it holds or we shut down."""
+        attempt = 0
+        while not self._closing and not self._closed:
+            attempt += 1
+            await asyncio.sleep(delay)
+            if self._closing or self._closed:
+                return
+            async with self._lifecycle_lock:
+                if self._closing or self._closed or self._stream_alive:
+                    return
+                try:
+                    self._subscribe(self._concurrency)
+                    logger.info("Pub/Sub stream reconnected", extra={"attempt": attempt})
+                    return
+                except Exception:
+                    logger.exception(
+                        "Pub/Sub reconnect failed; will retry", extra={"attempt": attempt}
+                    )
+            delay = min(delay * 2, _MAX_RECONNECT_BACKOFF_SECONDS)
 
     async def enqueue(self, job: Job) -> None:
         if self._closed:
@@ -248,18 +312,43 @@ class PubSubQueue(QueuePort):
             )
 
     def _on_stream_done(self, future: StreamingPullFuture) -> None:
+        """Runs on a library thread when the stream terminates.
+
+        Previously this logged one line and returned, leaving the pod alive and
+        consuming nothing forever. Now it marks the process unhealthy — so /livez
+        fails and Kubernetes restarts it — and also attempts a reconnect, so a
+        transient blip costs seconds rather than a pod restart.
+        """
         if self._closing or future.cancelled():
             return
+
+        self._stream_alive = False
+        self._streaming_future = None
+
         try:
             exception = future.exception()
         except Exception:
             logger.exception("Pub/Sub streaming subscriber future failed")
-            return
+            exception = None
         if exception is not None:
             logger.error(
                 "Pub/Sub streaming subscriber stopped unexpectedly",
                 exc_info=(type(exception), exception, exception.__traceback__),
             )
+        else:
+            logger.error("Pub/Sub streaming subscriber stopped without an error")
+
+        # Hand back to the event loop from this library thread. If the loop is
+        # gone we are shutting down anyway, and /livez already reports unhealthy.
+        loop = self._loop
+        if loop is None:
+            return
+        try:
+            self._supervisor = asyncio.run_coroutine_threadsafe(
+                self._reconnect_after(_INITIAL_RECONNECT_BACKOFF_SECONDS), loop
+            )
+        except RuntimeError:
+            logger.warning("event loop unavailable; not attempting a Pub/Sub reconnect")
 
     async def depth(self) -> int:
         # Pub/Sub exposes backlog size through Cloud Monitoring, not the

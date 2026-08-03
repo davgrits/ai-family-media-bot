@@ -62,10 +62,17 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.app.telegramSecretName }}
                   key: TELEGRAM_BOT_TOKEN
+          # /livez, not /healthz: the worker can serve HTTP perfectly while
+          # consuming nothing, because the Pub/Sub stream can terminate
+          # permanently and leave the pod Running and Ready forever. /livez
+          # reports whether this process is actually attached to the queue.
+          # failureThreshold 3 rides out a reconnect, which the adapter attempts
+          # with backoff before the probe gives up and Kubernetes restarts us.
           livenessProbe:
-            httpGet: { path: /healthz, port: http }
-            initialDelaySeconds: 5
+            httpGet: { path: /livez, port: http }
+            initialDelaySeconds: 10
             periodSeconds: 10
+            failureThreshold: 3
           readinessProbe:
             httpGet: { path: /readyz, port: http }
             initialDelaySeconds: 5
