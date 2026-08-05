@@ -8,10 +8,27 @@ import logging
 
 import httpx
 
+from .logging_setup import redact_token
+
 logger = logging.getLogger(__name__)
 
 # Telegram caption limit; longer stories are sent as a separate message.
 _CAPTION_LIMIT = 1024
+
+# Error bodies are echoed back for debugging; cap them so a stray HTML error
+# page from a proxy cannot flood the logs.
+_ERROR_BODY_LIMIT = 300
+
+
+class TelegramError(RuntimeError):
+    """A Telegram API call failed.
+
+    Raised in place of the underlying httpx error, whose message quotes the
+    request URL — and the URL path contains the bot token. Callers log this
+    with `logger.exception`, so the token must never reach the exception at
+    all: `raise ... from None` deliberately drops the httpx cause rather than
+    letting it print as a chained traceback.
+    """
 
 
 class TelegramClient:
@@ -32,6 +49,27 @@ class TelegramClient:
     def _url(self, method: str) -> str:
         return f"{self._api_base}/bot{self._token}/{method}"
 
+    async def _request(self, method: str, http_method: str = "POST", **kwargs) -> httpx.Response:
+        """Call `method` and raise TelegramError — never a token-bearing httpx
+        error — on any transport or HTTP-status failure."""
+        detail: str | None = None
+        try:
+            resp = await self._client.request(http_method, self._url(method), **kwargs)
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            body = redact_token(exc.response.text[:_ERROR_BODY_LIMIT])
+            detail = f"HTTP {exc.response.status_code} {body}".rstrip()
+        except httpx.HTTPError as exc:
+            detail = f"{type(exc).__name__}: {redact_token(str(exc))}"
+
+        # Raised outside the handlers on purpose: raising inside one would make
+        # the httpx error — whose message quotes the token-bearing URL — the
+        # implicit __context__ of ours, keeping the credential reachable on the
+        # object we hand to logger.exception.
+        if detail is not None:
+            raise TelegramError(f"{method} failed: {detail}")
+        return resp
+
     async def get_updates(self, offset: int | None = None, timeout: int = 30) -> list[dict]:
         """Long-poll getUpdates (polling mode). Returns raw update dicts."""
         if not self.enabled:
@@ -40,8 +78,7 @@ class TelegramClient:
         if offset is not None:
             params["offset"] = offset
         # Read timeout must exceed the server-side long-poll window.
-        resp = await self._client.get(self._url("getUpdates"), params=params, timeout=timeout + 10)
-        resp.raise_for_status()
+        resp = await self._request("getUpdates", "GET", params=params, timeout=timeout + 10)
         data = resp.json()
         return data.get("result", []) if data.get("ok") else []
 
@@ -81,10 +118,7 @@ class TelegramClient:
             await self._send_photo(chat_id, png_bytes, filename)
 
     async def _send_message(self, chat_id: int, text: str) -> None:
-        resp = await self._client.post(
-            self._url("sendMessage"), data={"chat_id": chat_id, "text": text}
-        )
-        resp.raise_for_status()
+        await self._request("sendMessage", data={"chat_id": chat_id, "text": text})
 
     async def _send_photo(
         self, chat_id: int, png_bytes: bytes, filename: str, caption: str | None = None
@@ -93,8 +127,7 @@ class TelegramClient:
         if caption:
             data["caption"] = caption
         files = {"photo": (filename, png_bytes, "image/png")}
-        resp = await self._client.post(self._url("sendPhoto"), data=data, files=files)
-        resp.raise_for_status()
+        await self._request("sendPhoto", data=data, files=files)
 
     async def aclose(self) -> None:
         if self._client:
